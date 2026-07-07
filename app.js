@@ -13,7 +13,9 @@ const newsKey = "mizan_news_v3";
 const adminsKey = "mizan_admins_v1";
 let activeView = "home";
 let currentAdmin = localStorage.getItem("mizan_current_admin") || "";
+let currentAdminPassword = sessionStorage.getItem("mizan_current_admin_password") || "";
 let searchTerm = "";
+let serverMode = false;
 
 function makeId() {
   return crypto.randomUUID?.() || `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -111,7 +113,13 @@ function getNews() {
 }
 
 function setNews(news) {
-  localStorage.setItem(newsKey, JSON.stringify(news));
+  try {
+    localStorage.setItem(newsKey, JSON.stringify(news));
+    return true;
+  } catch {
+    alert("تعذر حفظ الخبر في المتصفح. جرّب استخدام صورة أصغر أو رابط صورة بدل الرفع.");
+    return false;
+  }
 }
 
 function getAdmins() {
@@ -120,6 +128,94 @@ function getAdmins() {
 
 function setAdmins(admins) {
   localStorage.setItem(adminsKey, JSON.stringify(admins));
+}
+
+async function apiRequest(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "content-type": "application/json",
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Request failed");
+  }
+  return data;
+}
+
+async function syncNewsFromServer() {
+  if (location.protocol === "file:") {
+    return false;
+  }
+
+  try {
+    const news = await apiRequest("/api/news");
+    if (Array.isArray(news)) {
+      serverMode = true;
+      setNews(news.length ? news : seedNews);
+      return true;
+    }
+  } catch {
+    serverMode = false;
+  }
+  return false;
+}
+
+async function saveNewsToServer(item) {
+  if (!serverMode) {
+    return false;
+  }
+
+  await apiRequest("/api/news", {
+    method: "POST",
+    headers: {
+      "x-admin-user": currentAdmin,
+      "x-admin-pass": currentAdminPassword
+    },
+    body: JSON.stringify(item)
+  });
+  await syncNewsFromServer();
+  return true;
+}
+
+async function deleteNewsFromServer(id) {
+  if (!serverMode) {
+    return false;
+  }
+
+  await apiRequest(`/api/news/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: {
+      "x-admin-user": currentAdmin,
+      "x-admin-pass": currentAdminPassword
+    }
+  });
+  await syncNewsFromServer();
+  return true;
+}
+
+async function loginViaServer(username, password) {
+  if (!serverMode) {
+    return false;
+  }
+  await apiRequest("/api/admins/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password })
+  });
+  return true;
+}
+
+async function registerViaServer(username, password) {
+  if (!serverMode) {
+    return false;
+  }
+  await apiRequest("/api/admins/register", {
+    method: "POST",
+    body: JSON.stringify({ username, password })
+  });
+  return true;
 }
 
 function visibleNews() {
@@ -317,7 +413,7 @@ function switchAuthTab(tabName) {
   document.querySelector("#authMessage").textContent = "";
 }
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   const viewButton = event.target.closest("[data-view]");
   if (viewButton) {
     activeView = viewButton.dataset.view;
@@ -337,13 +433,23 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-logout]")) {
     currentAdmin = "";
+    currentAdminPassword = "";
     localStorage.removeItem("mizan_current_admin");
+    sessionStorage.removeItem("mizan_current_admin_password");
     renderAdminState();
   }
 
   const deleteButton = event.target.closest("[data-delete]");
   if (deleteButton) {
-    setNews(getNews().filter((item) => item.id !== deleteButton.dataset.delete));
+    try {
+      if (serverMode) {
+        await deleteNewsFromServer(deleteButton.dataset.delete);
+      } else {
+        setNews(getNews().filter((item) => item.id !== deleteButton.dataset.delete));
+      }
+    } catch {
+      alert("تعذر حذف الخبر. تأكد من تسجيل الدخول للوحة الإدارة.");
+    }
     renderSite();
     renderAdminNews();
   }
@@ -372,13 +478,31 @@ document.querySelector("#adminDialog").addEventListener("close", () => {
   }
 });
 
-document.querySelector("#loginForm").addEventListener("submit", (event) => {
+document.querySelector("#loginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const fields = form.elements;
   const admins = getAdmins();
-  const admin = admins.find((item) => item.username === fields.username.value.trim() && item.password === fields.password.value);
+  const username = fields.username.value.trim();
+  const password = fields.password.value;
+  const admin = admins.find((item) => item.username === username && item.password === password);
   const authMessage = document.querySelector("#authMessage");
+
+  if (serverMode) {
+    try {
+      await loginViaServer(username, password);
+      currentAdmin = username;
+      currentAdminPassword = password;
+      localStorage.setItem("mizan_current_admin", currentAdmin);
+      sessionStorage.setItem("mizan_current_admin_password", currentAdminPassword);
+      form.reset();
+      renderAdminState();
+      return;
+    } catch {
+      authMessage.textContent = "بيانات الدخول غير صحيحة.";
+      return;
+    }
+  }
 
   if (!admins.length) {
     authMessage.textContent = "لا يوجد مدير مسجل بعد. استخدم تبويب تسجيل أدمن لإنشاء أول حساب.";
@@ -391,28 +515,49 @@ document.querySelector("#loginForm").addEventListener("submit", (event) => {
   }
 
   currentAdmin = admin.username;
+  currentAdminPassword = password;
   localStorage.setItem("mizan_current_admin", currentAdmin);
+  sessionStorage.setItem("mizan_current_admin_password", currentAdminPassword);
   form.reset();
   renderAdminState();
 });
 
-document.querySelector("#registerForm").addEventListener("submit", (event) => {
+document.querySelector("#registerForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const fields = form.elements;
   const admins = getAdmins();
   const username = fields.username.value.trim();
+  const password = fields.password.value;
   const authMessage = document.querySelector("#authMessage");
+
+  if (serverMode) {
+    try {
+      await registerViaServer(username, password);
+      currentAdmin = username;
+      currentAdminPassword = password;
+      localStorage.setItem("mizan_current_admin", currentAdmin);
+      sessionStorage.setItem("mizan_current_admin_password", currentAdminPassword);
+      form.reset();
+      renderAdminState();
+      return;
+    } catch (error) {
+      authMessage.textContent = error.message === "Admin already exists" ? "اسم المدير مسجل مسبقًا." : "تعذر تسجيل المدير.";
+      return;
+    }
+  }
 
   if (admins.some((admin) => admin.username === username)) {
     authMessage.textContent = "اسم المدير مسجل مسبقًا.";
     return;
   }
 
-  admins.push({ username, password: fields.password.value });
+  admins.push({ username, password });
   setAdmins(admins);
   currentAdmin = username;
+  currentAdminPassword = password;
   localStorage.setItem("mizan_current_admin", currentAdmin);
+  sessionStorage.setItem("mizan_current_admin_password", currentAdminPassword);
   form.reset();
   renderAdminState();
 });
@@ -439,7 +584,16 @@ document.querySelector("#newsForm").addEventListener("submit", async (event) => 
     createdAt: existing?.createdAt || Date.now()
   };
 
-  setNews(existing ? news.map((newsItem) => newsItem.id === id ? item : newsItem) : [item, ...news]);
+  try {
+    if (serverMode) {
+      await saveNewsToServer(item);
+    } else {
+      setNews(existing ? news.map((newsItem) => newsItem.id === id ? item : newsItem) : [item, ...news]);
+    }
+  } catch {
+    alert("تعذر حفظ الخبر على السيرفر. تأكد من تسجيل الدخول وحجم الصور.");
+    return;
+  }
   form.reset();
   renderSite();
   renderAdminNews();
@@ -464,9 +618,14 @@ window.addEventListener("hashchange", () => {
   }
 });
 
-fillCategorySelect();
-renderSite();
+async function initApp() {
+  await syncNewsFromServer();
+  fillCategorySelect();
+  renderSite();
 
-if (location.hash === "#admin") {
-  openAdmin();
+  if (location.hash === "#admin") {
+    openAdmin();
+  }
 }
+
+initApp();

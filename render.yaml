@@ -1,11 +1,7 @@
 services:
   - type: web
     name: mizan-political-site
-    runtime: static
-    buildCommand: "true"
-    staticPublishPath: .
+    runtime: node
+    buildCommand: "npm install"
+    startCommand: "npm start"
     autoDeployTrigger: commit
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
