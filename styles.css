@@ -55,7 +55,6 @@ img { display: block; max-width: 100%; }
   align-items: center;
   gap: 14px;
   min-height: 40px;
-  overflow: hidden;
 }
 
 .breaking-label {
@@ -67,16 +66,27 @@ img { display: block; max-width: 100%; }
   font-weight: 700;
   font-size: 12px;
   flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
+}
+
+.breaking-track {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
 }
 
 .breaking-text {
+  display: inline-block;
   white-space: nowrap;
-  animation: ticker 24s linear infinite;
+  animation: ticker 34s linear infinite;
   color: #fff;
+  will-change: transform;
 }
 
 @keyframes ticker {
-  from { transform: translateX(-8%); }
+  from { transform: translateX(-100%); }
   to { transform: translateX(100%); }
 }
 

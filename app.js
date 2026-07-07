@@ -261,6 +261,19 @@ function renderNav() {
   `).join("");
 }
 
+function renderBreakingNews() {
+  const breakingText = document.querySelector("#breakingText");
+  const latest = getNews()
+    .slice()
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .filter((item) => item.title)
+    .slice(0, 8);
+
+  breakingText.textContent = latest.length
+    ? latest.map((item) => `${categoryNames[item.category] || "مادة"}: ${item.title}`).join(" · ")
+    : "تحليل رصين لما وراء الخبر · من الترجمة الدقيقة إلى الفهم العميق · قراءة المصادر والسياقات قبل الاستنتاج";
+}
+
 function renderLeads() {
   const leadGrid = document.querySelector("#leadGrid");
   const news = visibleNews();
@@ -432,6 +445,7 @@ function authorBlock(item) {
 }
 
 function renderSite() {
+  renderBreakingNews();
   const postId = getPostIdFromLocation();
   if (postId) {
     renderPostView(postId);
