@@ -16,6 +16,7 @@ let currentAdmin = localStorage.getItem("mizan_current_admin") || "";
 let currentAdminPassword = sessionStorage.getItem("mizan_current_admin_password") || "";
 let searchTerm = "";
 let serverMode = false;
+let editingNewsId = "";
 
 function makeId() {
   return crypto.randomUUID?.() || `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -201,17 +202,6 @@ async function loginViaServer(username, password) {
     return false;
   }
   await apiRequest("/api/admins/login", {
-    method: "POST",
-    body: JSON.stringify({ username, password })
-  });
-  return true;
-}
-
-async function registerViaServer(username, password) {
-  if (!serverMode) {
-    return false;
-  }
-  await apiRequest("/api/admins/register", {
     method: "POST",
     body: JSON.stringify({ username, password })
   });
@@ -423,6 +413,9 @@ function renderAdminState() {
   dashboard.classList.toggle("hidden", !currentAdmin);
   currentAdminEl.textContent = currentAdmin ? `مرحبًا، ${currentAdmin}` : "";
   if (currentAdmin) {
+    if (!editingNewsId) {
+      setEditorMode();
+    }
     renderAdminNews();
   }
 }
@@ -442,6 +435,32 @@ function renderAdminNews() {
       </div>
     </div>
   `).join("");
+}
+
+function setEditorMode(item = null) {
+  const state = document.querySelector("#editorState");
+  const saveButton = document.querySelector("#saveMaterialButton");
+  const form = document.querySelector("#newsForm");
+
+  editingNewsId = item?.id || "";
+  form.elements.id.value = editingNewsId;
+
+  if (item) {
+    state.innerHTML = `
+      <strong>تعديل مادة منشورة</strong>
+      <span>أنت تعدّل: ${item.title}. استخدم زر إلغاء التعديل إذا أردت نشر مادة جديدة.</span>
+    `;
+    saveButton.textContent = "حفظ التعديل";
+    state.classList.add("is-editing");
+    return;
+  }
+
+  state.innerHTML = `
+    <strong>إضافة مادة جديدة</strong>
+    <span>سيتم نشر مادة جديدة ولن يتم تعديل أي مادة منشورة.</span>
+  `;
+  saveButton.textContent = "نشر مادة جديدة";
+  state.classList.remove("is-editing");
 }
 
 function placementName(placement) {
@@ -476,15 +495,6 @@ function readImageFromFields(fields, fileFieldName, urlFieldName) {
 
 function readImage(form) {
   return readImageFromFields(form.elements, "imageFile", "imageUrl");
-}
-
-function switchAuthTab(tabName) {
-  document.querySelectorAll("[data-auth-tab]").forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.authTab === tabName);
-  });
-  document.querySelector("#loginForm").classList.toggle("hidden", tabName !== "login");
-  document.querySelector("#registerForm").classList.toggle("hidden", tabName !== "register");
-  document.querySelector("#authMessage").textContent = "";
 }
 
 document.addEventListener("click", async (event) => {
@@ -536,11 +546,6 @@ document.addEventListener("click", async (event) => {
     closeAdmin();
   }
 
-  const authTab = event.target.closest("[data-auth-tab]");
-  if (authTab) {
-    switchAuthTab(authTab.dataset.authTab);
-  }
-
   if (event.target.closest("[data-logout]")) {
     currentAdmin = "";
     currentAdminPassword = "";
@@ -567,9 +572,12 @@ document.addEventListener("click", async (event) => {
   const editButton = event.target.closest("[data-edit]");
   if (editButton) {
     const item = getNews().find((newsItem) => newsItem.id === editButton.dataset.edit);
+    if (!item) {
+      return;
+    }
     const form = document.querySelector("#newsForm");
     const fields = form.elements;
-    fields.id.value = item.id;
+    setEditorMode(item);
     fields.title.value = item.title;
     fields.category.value = item.category;
     fields.placement.value = item.placement;
@@ -623,7 +631,7 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
   }
 
   if (!admins.length) {
-    authMessage.textContent = "لا يوجد مدير مسجل بعد. استخدم تبويب تسجيل أدمن لإنشاء أول حساب.";
+    authMessage.textContent = "لا يوجد حساب أدمن محلي. على النسخة المنشورة اضبط ADMIN_USERNAME و ADMIN_PASSWORD من إعدادات Render.";
     return;
   }
 
@@ -640,53 +648,14 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
   renderAdminState();
 });
 
-document.querySelector("#registerForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const fields = form.elements;
-  const admins = getAdmins();
-  const username = fields.username.value.trim();
-  const password = fields.password.value;
-  const authMessage = document.querySelector("#authMessage");
-
-  if (serverMode) {
-    try {
-      await registerViaServer(username, password);
-      currentAdmin = username;
-      currentAdminPassword = password;
-      localStorage.setItem("mizan_current_admin", currentAdmin);
-      sessionStorage.setItem("mizan_current_admin_password", currentAdminPassword);
-      form.reset();
-      renderAdminState();
-      return;
-    } catch (error) {
-      authMessage.textContent = error.message === "Admin already exists" ? "اسم المدير مسجل مسبقًا." : "تعذر تسجيل المدير.";
-      return;
-    }
-  }
-
-  if (admins.some((admin) => admin.username === username)) {
-    authMessage.textContent = "اسم المدير مسجل مسبقًا.";
-    return;
-  }
-
-  admins.push({ username, password });
-  setAdmins(admins);
-  currentAdmin = username;
-  currentAdminPassword = password;
-  localStorage.setItem("mizan_current_admin", currentAdmin);
-  sessionStorage.setItem("mizan_current_admin_password", currentAdminPassword);
-  form.reset();
-  renderAdminState();
-});
-
 document.querySelector("#newsForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const fields = form.elements;
   const news = getNews();
-  const id = fields.id.value || makeId();
-  const existing = news.find((item) => item.id === id);
+  const isEditing = Boolean(editingNewsId);
+  const id = isEditing ? editingNewsId : makeId();
+  const existing = isEditing ? news.find((item) => item.id === id) : null;
   const image = await readImage(form) || existing?.image || fallbackImage;
   const authorImage = await readImageFromFields(fields, "authorImageFile", "authorImageUrl") || existing?.authorImage || "";
   const item = {
@@ -713,6 +682,7 @@ document.querySelector("#newsForm").addEventListener("submit", async (event) => 
     return;
   }
   form.reset();
+  setEditorMode();
   renderSite();
   renderAdminNews();
 });
@@ -720,6 +690,7 @@ document.querySelector("#newsForm").addEventListener("submit", async (event) => 
 document.querySelector("#newsForm").addEventListener("reset", (event) => {
   setTimeout(() => {
     event.currentTarget.elements.id.value = "";
+    setEditorMode();
   });
 });
 

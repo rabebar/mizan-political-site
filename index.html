@@ -91,17 +91,12 @@
     <div class="admin__head">
       <div>
         <p class="kicker">لوحة الإدارة</p>
-        <h2>إدارة الأخبار والمديرين</h2>
+        <h2>إدارة المواد المنشورة</h2>
       </div>
       <button class="icon-button" type="button" data-close-admin aria-label="إغلاق">×</button>
     </div>
 
     <div class="auth-view" id="authView">
-      <div class="tabs" role="tablist" aria-label="الدخول أو التسجيل">
-        <button class="tab is-active" type="button" data-auth-tab="login">دخول</button>
-        <button class="tab" type="button" data-auth-tab="register">تسجيل أدمن</button>
-      </div>
-
       <form class="form" id="loginForm">
         <label>اسم المستخدم
           <input name="username" autocomplete="username" required>
@@ -112,15 +107,6 @@
         <button class="primary" type="submit">دخول اللوحة</button>
       </form>
 
-      <form class="form hidden" id="registerForm">
-        <label>اسم المدير
-          <input name="username" autocomplete="username" required minlength="3">
-        </label>
-        <label>كلمة السر
-          <input name="password" type="password" autocomplete="new-password" required minlength="4">
-        </label>
-        <button class="primary" type="submit">إضافة مدير</button>
-      </form>
       <p class="note" id="authMessage"></p>
     </div>
 
@@ -128,6 +114,11 @@
       <div class="dashboard__bar">
         <strong id="currentAdmin"></strong>
         <button class="ghost" type="button" data-logout>تسجيل خروج</button>
+      </div>
+
+      <div class="editor-state" id="editorState">
+        <strong>إضافة مادة جديدة</strong>
+        <span>سيتم نشر مادة جديدة ولن يتم تعديل أي مادة منشورة.</span>
       </div>
 
       <form class="editor" id="newsForm">
@@ -168,13 +159,13 @@
           <textarea name="body" rows="6"></textarea>
         </label>
         <div class="editor__actions">
-          <button class="primary" type="submit">حفظ الخبر</button>
-          <button class="ghost" type="reset">تفريغ النموذج</button>
+          <button class="primary" type="submit" id="saveMaterialButton">نشر مادة جديدة</button>
+          <button class="ghost" type="reset" data-new-material>إلغاء التعديل وبدء مادة جديدة</button>
         </div>
       </form>
 
       <div class="manage-list">
-        <h3>الأخبار المنشورة</h3>
+        <h3>كل المواد المنشورة</h3>
         <div id="adminNewsList"></div>
       </div>
     </div>

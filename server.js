@@ -11,6 +11,8 @@ const newsFile = join(dataDir, "news.json");
 const adminsFile = join(dataDir, "admins.json");
 const port = Number(process.env.PORT || 10000);
 const maxBodySize = 8 * 1024 * 1024;
+const envAdminUser = String(process.env.ADMIN_USERNAME || "").trim();
+const envAdminPassword = String(process.env.ADMIN_PASSWORD || "");
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -62,12 +64,20 @@ function sendError(response, error) {
 async function requireAdmin(request) {
   const username = request.headers["x-admin-user"] || "";
   const password = request.headers["x-admin-pass"] || "";
-  const admins = await readJson(adminsFile, []);
+  const admins = await getAdmins();
   const found = admins.find((admin) => admin.username === username && admin.passwordHash === hashPassword(password));
   if (!found) {
     throw Object.assign(new Error("Unauthorized"), { status: 401 });
   }
   return found;
+}
+
+async function getAdmins() {
+  const storedAdmins = await readJson(adminsFile, []);
+  const envAdmin = envAdminUser && envAdminPassword
+    ? [{ username: envAdminUser, passwordHash: hashPassword(envAdminPassword), source: "env" }]
+    : [];
+  return [...envAdmin, ...storedAdmins];
 }
 
 function normalizeItem(item) {
@@ -90,29 +100,11 @@ async function handleApi(request, response, url) {
     return sendJson(response, 200, await readJson(newsFile, []));
   }
 
-  if (url.pathname === "/api/admins/register" && request.method === "POST") {
-    const body = await readBody(request);
-    const username = String(body.username || "").trim();
-    const password = String(body.password || "");
-    if (username.length < 3 || password.length < 4) {
-      return sendJson(response, 400, { error: "Invalid username or password" });
-    }
-
-    const admins = await readJson(adminsFile, []);
-    if (admins.some((admin) => admin.username === username)) {
-      return sendJson(response, 409, { error: "Admin already exists" });
-    }
-
-    admins.push({ username, passwordHash: hashPassword(password), createdAt: Date.now() });
-    await writeJson(adminsFile, admins);
-    return sendJson(response, 201, { username });
-  }
-
   if (url.pathname === "/api/admins/login" && request.method === "POST") {
     const body = await readBody(request);
     const username = String(body.username || "").trim();
     const password = String(body.password || "");
-    const admins = await readJson(adminsFile, []);
+    const admins = await getAdmins();
     const found = admins.find((admin) => admin.username === username && admin.passwordHash === hashPassword(password));
     return found ? sendJson(response, 200, { username }) : sendJson(response, 401, { error: "Invalid login" });
   }
