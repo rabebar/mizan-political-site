@@ -324,6 +324,28 @@ img { display: block; max-width: 100%; }
   font-size: 12.5px;
 }
 
+.author-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.story-overlay .author-mini {
+  color: rgba(255, 255, 255, .84);
+}
+
+.author-mini img {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--line-strong);
+  background: var(--primary);
+}
+
 .latest-section { margin-bottom: 52px; }
 
 .section-head {

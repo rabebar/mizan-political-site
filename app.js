@@ -2,13 +2,14 @@ const categories = [
   { id: "home", label: "الرئيسية" },
   { id: "syria", label: "سوريا" },
   { id: "palestine", label: "فلسطين" },
+  { id: "articles", label: "مقالات" },
   { id: "hebrew", label: "ترجمات عبرية" },
   { id: "international", label: "ترجمات دولية" },
   { id: "middle-east", label: "الشرق الأوسط" }
 ];
 
 const categoryNames = Object.fromEntries(categories.map((category) => [category.id, category.label]));
-const newsKey = "mizan_news_v2";
+const newsKey = "mizan_news_v3";
 const adminsKey = "mizan_admins_v1";
 let activeView = "home";
 let currentAdmin = localStorage.getItem("mizan_current_admin") || "";
@@ -36,6 +37,13 @@ const fallbackImage = "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(`
   <circle cx="820" cy="330" r="170" fill="#ffffff" opacity=".62"/>
   <path d="M560 290h420v16H560zm0 52h340v16H560zm0 52h260v16H560z" fill="#9aaaa1"/>
   <text x="600" y="206" text-anchor="middle" font-family="Tahoma, Arial" font-size="44" font-weight="700" fill="#18251f">الميزان السياسي</text>
+</svg>`);
+
+const fallbackAuthorImage = "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+  <rect width="160" height="160" fill="#eef1e9"/>
+  <circle cx="80" cy="58" r="30" fill="#23433a"/>
+  <path d="M34 140c8-33 28-50 46-50s38 17 46 50" fill="#c9a877"/>
 </svg>`);
 
 const seedNews = [
@@ -78,6 +86,18 @@ const seedNews = [
     summary: "رصد لأبرز الاتجاهات في تغطية المنطقة داخل الصحافة العالمية.",
     body: "",
     createdAt: Date.now() - 1000 * 60 * 240
+  },
+  {
+    id: makeId(),
+    title: "لماذا نحتاج إلى قراءة سياسية بطيئة في زمن الخبر السريع؟",
+    category: "articles",
+    placement: "normal",
+    image: fallbackImage,
+    authorName: "هيئة التحرير",
+    authorImage: fallbackAuthorImage,
+    summary: "مقال افتتاحي عن ضرورة التمييز بين الخبر والتحليل، وبين المعلومة المؤكدة والانطباع السياسي.",
+    body: "",
+    createdAt: Date.now() - 1000 * 60 * 300
   }
 ];
 
@@ -109,7 +129,7 @@ function visibleNews() {
   }
   if (searchTerm) {
     const term = searchTerm.toLowerCase();
-    news = news.filter((item) => `${item.title} ${item.summary} ${item.body || ""}`.toLowerCase().includes(term));
+    news = news.filter((item) => `${item.title} ${item.summary} ${item.body || ""} ${item.authorName || ""}`.toLowerCase().includes(term));
   }
   return news;
 }
@@ -151,6 +171,7 @@ function mainStory(item) {
       <div class="story-overlay">
         <span class="story-tag">${categoryNames[item.category] || "خبر"}</span>
         <h2>${item.title}</h2>
+        ${authorBlock(item)}
         <p>${item.summary}</p>
       </div>
     </article>
@@ -164,6 +185,7 @@ function sideStory(item) {
       <div>
         <span class="story-tag">${categoryNames[item.category] || "خبر"}</span>
         <h3>${item.title}</h3>
+        ${authorBlock(item)}
         <div class="meta">${placementName(item.placement)}</div>
       </div>
     </article>
@@ -184,11 +206,25 @@ function renderNewsList() {
       <div class="card-body">
         <span class="story-tag">${categoryNames[item.category] || "خبر"}</span>
         <h3>${item.title}</h3>
+        ${authorBlock(item)}
         <p>${item.summary}</p>
         <div class="meta">${placementName(item.placement)}</div>
       </div>
     </article>
   `).join("");
+}
+
+function authorBlock(item) {
+  if (!item.authorName && item.category !== "articles") {
+    return "";
+  }
+
+  return `
+    <div class="author-mini">
+      <img src="${item.authorImage || fallbackAuthorImage}" alt="">
+      <span>${item.authorName || "كاتب المقال"}</span>
+    </div>
+  `;
 }
 
 function renderSite() {
@@ -255,11 +291,10 @@ function fillCategorySelect() {
     .join("");
 }
 
-function readImage(form) {
-  const fields = form.elements;
-  const file = fields.imageFile.files[0];
+function readImageFromFields(fields, fileFieldName, urlFieldName) {
+  const file = fields[fileFieldName].files[0];
   if (!file) {
-    return Promise.resolve(fields.imageUrl.value.trim());
+    return Promise.resolve(fields[urlFieldName].value.trim());
   }
 
   return new Promise((resolve) => {
@@ -267,6 +302,10 @@ function readImage(form) {
     reader.onload = () => resolve(reader.result);
     reader.readAsDataURL(file);
   });
+}
+
+function readImage(form) {
+  return readImageFromFields(form.elements, "imageFile", "imageUrl");
 }
 
 function switchAuthTab(tabName) {
@@ -318,6 +357,8 @@ document.addEventListener("click", (event) => {
     fields.title.value = item.title;
     fields.category.value = item.category;
     fields.placement.value = item.placement;
+    fields.authorName.value = item.authorName || "";
+    fields.authorImageUrl.value = item.authorImage?.startsWith("data:") ? "" : item.authorImage || "";
     fields.imageUrl.value = item.image?.startsWith("data:") ? "" : item.image;
     fields.summary.value = item.summary;
     fields.body.value = item.body || "";
@@ -384,12 +425,15 @@ document.querySelector("#newsForm").addEventListener("submit", async (event) => 
   const id = fields.id.value || makeId();
   const existing = news.find((item) => item.id === id);
   const image = await readImage(form) || existing?.image || fallbackImage;
+  const authorImage = await readImageFromFields(fields, "authorImageFile", "authorImageUrl") || existing?.authorImage || "";
   const item = {
     id,
     title: fields.title.value.trim(),
     category: fields.category.value,
     placement: fields.placement.value,
     image,
+    authorName: fields.authorName.value.trim(),
+    authorImage,
     summary: fields.summary.value.trim(),
     body: fields.body.value.trim(),
     createdAt: existing?.createdAt || Date.now()
