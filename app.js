@@ -14,6 +14,7 @@ const adminsKey = "mizan_admins_v1";
 let activeView = "home";
 let currentAdmin = localStorage.getItem("mizan_current_admin") || "";
 let currentAdminPassword = sessionStorage.getItem("mizan_current_admin_password") || "";
+let currentAdminRole = localStorage.getItem("mizan_current_admin_role") || "admin";
 let searchTerm = "";
 let serverMode = false;
 let editingNewsId = "";
@@ -197,15 +198,46 @@ async function deleteNewsFromServer(id) {
   return true;
 }
 
+function adminHeaders() {
+  return {
+    "x-admin-user": currentAdmin,
+    "x-admin-pass": currentAdminPassword
+  };
+}
+
 async function loginViaServer(username, password) {
   if (!serverMode) {
     return false;
   }
-  await apiRequest("/api/admins/login", {
+  return apiRequest("/api/admins/login", {
     method: "POST",
     body: JSON.stringify({ username, password })
   });
-  return true;
+}
+
+async function fetchAdminsFromServer() {
+  if (!serverMode || currentAdminRole !== "super_admin") {
+    return [];
+  }
+
+  return apiRequest("/api/admins", {
+    headers: adminHeaders()
+  });
+}
+
+async function createAdminOnServer(admin) {
+  return apiRequest("/api/admins", {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify(admin)
+  });
+}
+
+async function deleteAdminFromServer(username) {
+  return apiRequest(`/api/admins/${encodeURIComponent(username)}`, {
+    method: "DELETE",
+    headers: adminHeaders()
+  });
 }
 
 function visibleNews() {
@@ -409,14 +441,17 @@ function renderAdminState() {
   const authView = document.querySelector("#authView");
   const dashboard = document.querySelector("#dashboard");
   const currentAdminEl = document.querySelector("#currentAdmin");
+  const superPanel = document.querySelector("#superAdminPanel");
   authView.classList.toggle("hidden", Boolean(currentAdmin));
   dashboard.classList.toggle("hidden", !currentAdmin);
-  currentAdminEl.textContent = currentAdmin ? `مرحبًا، ${currentAdmin}` : "";
+  superPanel.classList.toggle("hidden", currentAdminRole !== "super_admin");
+  currentAdminEl.textContent = currentAdmin ? `مرحبًا، ${currentAdmin} · ${roleName(currentAdminRole)}` : "";
   if (currentAdmin) {
     if (!editingNewsId) {
       setEditorMode();
     }
     renderAdminNews();
+    renderAdminUsers();
   }
 }
 
@@ -461,6 +496,44 @@ function setEditorMode(item = null) {
   `;
   saveButton.textContent = "نشر مادة جديدة";
   state.classList.remove("is-editing");
+}
+
+async function renderAdminUsers() {
+  const list = document.querySelector("#adminUsersList");
+  const message = document.querySelector("#adminUserMessage");
+
+  if (currentAdminRole !== "super_admin") {
+    list.innerHTML = "";
+    return;
+  }
+
+  if (!serverMode) {
+    list.innerHTML = `<p class="note">إدارة المدراء تعمل على النسخة المنشورة فقط.</p>`;
+    return;
+  }
+
+  try {
+    const admins = await fetchAdminsFromServer();
+    list.innerHTML = admins.map((admin) => `
+      <div class="admin-row">
+        <div>
+          <strong>${admin.username}</strong>
+          <p>${roleName(admin.role)} · ${admin.source === "env" ? "حساب ثابت من Render" : "حساب مضاف من اللوحة"}</p>
+        </div>
+        <div class="row-actions">
+          ${admin.source === "env" ? "" : `<button class="danger" type="button" data-delete-admin="${admin.username}">حذف الصلاحية</button>`}
+        </div>
+      </div>
+    `).join("");
+    message.textContent = "";
+  } catch {
+    list.innerHTML = "";
+    message.textContent = "تعذر تحميل قائمة المدراء.";
+  }
+}
+
+function roleName(role) {
+  return role === "super_admin" ? "سوبر أدمن" : "أدمن تحرير";
 }
 
 function placementName(placement) {
@@ -549,9 +622,22 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-logout]")) {
     currentAdmin = "";
     currentAdminPassword = "";
+    currentAdminRole = "admin";
     localStorage.removeItem("mizan_current_admin");
+    localStorage.removeItem("mizan_current_admin_role");
     sessionStorage.removeItem("mizan_current_admin_password");
     renderAdminState();
+  }
+
+  const deleteAdminButton = event.target.closest("[data-delete-admin]");
+  if (deleteAdminButton) {
+    try {
+      await deleteAdminFromServer(deleteAdminButton.dataset.deleteAdmin);
+      await renderAdminUsers();
+    } catch {
+      document.querySelector("#adminUserMessage").textContent = "تعذر حذف صلاحية هذا المدير.";
+    }
+    return;
   }
 
   const deleteButton = event.target.closest("[data-delete]");
@@ -616,10 +702,12 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
 
   if (serverMode) {
     try {
-      await loginViaServer(username, password);
+      const adminData = await loginViaServer(username, password);
       currentAdmin = username;
       currentAdminPassword = password;
+      currentAdminRole = adminData.role || "admin";
       localStorage.setItem("mizan_current_admin", currentAdmin);
+      localStorage.setItem("mizan_current_admin_role", currentAdminRole);
       sessionStorage.setItem("mizan_current_admin_password", currentAdminPassword);
       form.reset();
       renderAdminState();
@@ -642,10 +730,34 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
 
   currentAdmin = admin.username;
   currentAdminPassword = password;
+  currentAdminRole = admin.role || "admin";
   localStorage.setItem("mizan_current_admin", currentAdmin);
+  localStorage.setItem("mizan_current_admin_role", currentAdminRole);
   sessionStorage.setItem("mizan_current_admin_password", currentAdminPassword);
   form.reset();
   renderAdminState();
+});
+
+document.querySelector("#adminUserForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const fields = form.elements;
+  const message = document.querySelector("#adminUserMessage");
+
+  try {
+    await createAdminOnServer({
+      username: fields.username.value.trim(),
+      password: fields.password.value,
+      role: fields.role.value
+    });
+    form.reset();
+    message.textContent = "تم منح الصلاحية بنجاح.";
+    await renderAdminUsers();
+  } catch (error) {
+    message.textContent = error.message === "Admin already exists"
+      ? "هذا الحساب يملك صلاحية مسبقًا."
+      : "تعذر منح الصلاحية. تأكد من كلمة سر لا تقل عن 8 أحرف.";
+  }
 });
 
 document.querySelector("#newsForm").addEventListener("submit", async (event) => {

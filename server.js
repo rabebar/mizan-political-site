@@ -13,6 +13,7 @@ const port = Number(process.env.PORT || 10000);
 const maxBodySize = 8 * 1024 * 1024;
 const envAdminUser = String(process.env.ADMIN_USERNAME || "").trim();
 const envAdminPassword = String(process.env.ADMIN_PASSWORD || "");
+const superAdminUser = String(process.env.SUPER_ADMIN_USERNAME || envAdminUser || "").trim();
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -72,12 +73,36 @@ async function requireAdmin(request) {
   return found;
 }
 
+async function requireSuperAdmin(request) {
+  const admin = await requireAdmin(request);
+  if (admin.role !== "super_admin") {
+    throw Object.assign(new Error("Super admin required"), { status: 403 });
+  }
+  return admin;
+}
+
 async function getAdmins() {
   const storedAdmins = await readJson(adminsFile, []);
   const envAdmin = envAdminUser && envAdminPassword
-    ? [{ username: envAdminUser, passwordHash: hashPassword(envAdminPassword), source: "env" }]
+    ? [{ username: envAdminUser, passwordHash: hashPassword(envAdminPassword), role: "super_admin", source: "env" }]
     : [];
-  return [...envAdmin, ...storedAdmins];
+  return [
+    ...envAdmin,
+    ...storedAdmins.map((admin) => ({
+      ...admin,
+      role: admin.role === "super_admin" || admin.username === superAdminUser ? "super_admin" : "admin",
+      source: admin.source || "stored"
+    }))
+  ];
+}
+
+function publicAdmin(admin) {
+  return {
+    username: admin.username,
+    role: admin.role === "super_admin" ? "super_admin" : "admin",
+    source: admin.source || "stored",
+    createdAt: admin.createdAt || null
+  };
 }
 
 function normalizeItem(item) {
@@ -106,7 +131,52 @@ async function handleApi(request, response, url) {
     const password = String(body.password || "");
     const admins = await getAdmins();
     const found = admins.find((admin) => admin.username === username && admin.passwordHash === hashPassword(password));
-    return found ? sendJson(response, 200, { username }) : sendJson(response, 401, { error: "Invalid login" });
+    return found ? sendJson(response, 200, publicAdmin(found)) : sendJson(response, 401, { error: "Invalid login" });
+  }
+
+  if (url.pathname === "/api/admins" && request.method === "GET") {
+    await requireSuperAdmin(request);
+    const admins = await getAdmins();
+    return sendJson(response, 200, admins.map(publicAdmin));
+  }
+
+  if (url.pathname === "/api/admins" && request.method === "POST") {
+    await requireSuperAdmin(request);
+    const body = await readBody(request);
+    const username = String(body.username || "").trim();
+    const password = String(body.password || "");
+    const role = body.role === "super_admin" ? "super_admin" : "admin";
+
+    if (username.length < 3 || password.length < 8) {
+      return sendJson(response, 400, { error: "Invalid username or password" });
+    }
+
+    const admins = await getAdmins();
+    if (admins.some((admin) => admin.username.toLowerCase() === username.toLowerCase())) {
+      return sendJson(response, 409, { error: "Admin already exists" });
+    }
+
+    const storedAdmins = await readJson(adminsFile, []);
+    storedAdmins.push({ username, passwordHash: hashPassword(password), role, createdAt: Date.now() });
+    await writeJson(adminsFile, storedAdmins);
+    return sendJson(response, 201, { username, role, source: "stored", createdAt: Date.now() });
+  }
+
+  if (url.pathname.startsWith("/api/admins/") && request.method === "DELETE") {
+    const requester = await requireSuperAdmin(request);
+    const username = decodeURIComponent(url.pathname.replace("/api/admins/", ""));
+
+    if (username === envAdminUser) {
+      return sendJson(response, 400, { error: "Cannot delete environment super admin" });
+    }
+
+    if (username === requester.username) {
+      return sendJson(response, 400, { error: "Cannot delete current admin" });
+    }
+
+    const storedAdmins = await readJson(adminsFile, []);
+    await writeJson(adminsFile, storedAdmins.filter((admin) => admin.username !== username));
+    return sendJson(response, 200, { ok: true });
   }
 
   if (url.pathname === "/api/news" && request.method === "POST") {

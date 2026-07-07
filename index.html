@@ -121,6 +121,34 @@
         <span>سيتم نشر مادة جديدة ولن يتم تعديل أي مادة منشورة.</span>
       </div>
 
+      <section class="super-admin-panel hidden" id="superAdminPanel">
+        <div class="panel-head">
+          <div>
+            <p class="kicker">صلاحيات السوبر أدمن</p>
+            <h3>إدارة المدراء</h3>
+          </div>
+          <span>إضافة مدير جديد لا تتم إلا من هنا، ولا يوجد تسجيل عام.</span>
+        </div>
+
+        <form class="admin-user-form" id="adminUserForm">
+          <label>بريد أو اسم المدير
+            <input name="username" placeholder="editor@example.com" required>
+          </label>
+          <label>كلمة السر المؤقتة
+            <input name="password" type="password" minlength="8" required>
+          </label>
+          <label>الصلاحية
+            <select name="role">
+              <option value="admin">أدمن تحرير</option>
+              <option value="super_admin">سوبر أدمن</option>
+            </select>
+          </label>
+          <button class="primary" type="submit">منح الصلاحية</button>
+        </form>
+        <p class="note" id="adminUserMessage"></p>
+        <div id="adminUsersList"></div>
+      </section>
+
       <form class="editor" id="newsForm">
         <input type="hidden" name="id">
         <label>العنوان
