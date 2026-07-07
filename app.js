@@ -260,9 +260,31 @@ function renderLeads() {
   `;
 }
 
+function postHash(id) {
+  return `#post/${encodeURIComponent(id)}`;
+}
+
+function fullPostUrl(id) {
+  const url = new URL(location.href);
+  url.hash = postHash(id).slice(1);
+  return url.href;
+}
+
+function getPostIdFromHash() {
+  return location.hash.startsWith("#post/") ? decodeURIComponent(location.hash.replace("#post/", "")) : "";
+}
+
+function setHomeVisibility(isHome) {
+  document.querySelector(".mission-strip").classList.toggle("hidden", !isHome);
+  document.querySelector("#leadGrid").classList.toggle("hidden", !isHome);
+  document.querySelector(".latest-section").classList.toggle("hidden", !isHome);
+  document.querySelector(".analysis-band").classList.toggle("hidden", !isHome);
+  document.querySelector("#postView").classList.toggle("hidden", isHome);
+}
+
 function mainStory(item) {
   return `
-    <article class="main-story">
+    <article class="main-story post-link" data-open-post="${item.id}" role="link" tabindex="0">
       <img src="${item.image || fallbackImage}" alt="">
       <div class="story-overlay">
         <span class="story-tag">${categoryNames[item.category] || "خبر"}</span>
@@ -276,7 +298,7 @@ function mainStory(item) {
 
 function sideStory(item) {
   return `
-    <article class="side-card">
+    <article class="side-card post-link" data-open-post="${item.id}" role="link" tabindex="0">
       <img src="${item.image || fallbackImage}" alt="">
       <div>
         <span class="story-tag">${categoryNames[item.category] || "خبر"}</span>
@@ -297,7 +319,7 @@ function renderNewsList() {
   sectionCount.textContent = `${news.length} مادة`;
 
   list.innerHTML = news.map((item) => `
-    <article class="news-card">
+    <article class="news-card post-link" data-open-post="${item.id}" role="link" tabindex="0">
       <img src="${item.image || fallbackImage}" alt="">
       <div class="card-body">
         <span class="story-tag">${categoryNames[item.category] || "خبر"}</span>
@@ -308,6 +330,52 @@ function renderNewsList() {
       </div>
     </article>
   `).join("");
+}
+
+function renderPostView(id) {
+  const postView = document.querySelector("#postView");
+  const item = getNews().find((newsItem) => newsItem.id === id);
+
+  if (!item) {
+    setHomeVisibility(false);
+    postView.innerHTML = `
+      <article class="post-full">
+        <button class="ghost" type="button" data-back-home>العودة للرئيسية</button>
+        <h1>المادة غير موجودة</h1>
+        <p>ربما تم حذف الخبر أو تغيّر الرابط.</p>
+      </article>
+    `;
+    return;
+  }
+
+  document.title = `${item.title} | مؤسسة الميزان السياسي`;
+  setHomeVisibility(false);
+  postView.innerHTML = `
+    <article class="post-full">
+      <div class="post-actions">
+        <button class="ghost" type="button" data-back-home>العودة للرئيسية</button>
+        <div>
+          <button class="ghost" type="button" data-copy-link="${item.id}">نسخ الرابط</button>
+          <button class="primary" type="button" data-print-post>طباعة</button>
+        </div>
+      </div>
+      <span class="story-tag">${categoryNames[item.category] || "خبر"}</span>
+      <h1>${item.title}</h1>
+      ${authorBlock(item)}
+      <p class="post-summary">${item.summary}</p>
+      <img class="post-hero" src="${item.image || fallbackImage}" alt="">
+      <div class="post-body">${formatPostBody(item.body || item.summary)}</div>
+    </article>
+  `;
+}
+
+function formatPostBody(text) {
+  return String(text || "")
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${paragraph.replace(/\n/g, "<br>")}</p>`)
+    .join("");
 }
 
 function authorBlock(item) {
@@ -324,6 +392,12 @@ function authorBlock(item) {
 }
 
 function renderSite() {
+  if (getPostIdFromHash()) {
+    renderPostView(getPostIdFromHash());
+    return;
+  }
+  document.title = "مؤسسة الميزان السياسي للأبحاث والترجمة الإعلامية";
+  setHomeVisibility(true);
   renderNav();
   renderLeads();
   renderNewsList();
@@ -414,11 +488,47 @@ function switchAuthTab(tabName) {
 }
 
 document.addEventListener("click", async (event) => {
+  const postLink = event.target.closest("[data-open-post]");
+  if (postLink) {
+    location.hash = postHash(postLink.dataset.openPost);
+    return;
+  }
+
+  if (event.target.closest("[data-back-home]")) {
+    history.pushState(null, "", location.pathname + location.search);
+    renderSite();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  const copyButton = event.target.closest("[data-copy-link]");
+  if (copyButton) {
+    const link = fullPostUrl(copyButton.dataset.copyLink);
+    try {
+      await navigator.clipboard.writeText(link);
+      copyButton.textContent = "تم نسخ الرابط";
+      setTimeout(() => {
+        copyButton.textContent = "نسخ الرابط";
+      }, 1400);
+    } catch {
+      prompt("انسخ الرابط:", link);
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-print-post]")) {
+    window.print();
+    return;
+  }
+
   const viewButton = event.target.closest("[data-view]");
   if (viewButton) {
     activeView = viewButton.dataset.view;
     searchTerm = "";
     document.querySelector("#searchInput").value = "";
+    if (getPostIdFromHash()) {
+      history.pushState(null, "", location.pathname + location.search);
+    }
     renderSite();
   }
 
@@ -469,6 +579,14 @@ document.addEventListener("click", async (event) => {
     fields.summary.value = item.summary;
     fields.body.value = item.body || "";
     form.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  const postLink = event.target.closest?.("[data-open-post]");
+  if (postLink && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    location.hash = postHash(postLink.dataset.openPost);
   }
 });
 
@@ -615,7 +733,9 @@ document.querySelector("#searchForm").addEventListener("submit", (event) => {
 window.addEventListener("hashchange", () => {
   if (location.hash === "#admin") {
     openAdmin();
+    return;
   }
+  renderSite();
 });
 
 async function initApp() {
