@@ -13,6 +13,9 @@ const maxBodySize = 8 * 1024 * 1024;
 const envAdminUser = String(process.env.ADMIN_USERNAME || "").trim();
 const envAdminPassword = String(process.env.ADMIN_PASSWORD || "");
 const superAdminUser = String(process.env.SUPER_ADMIN_USERNAME || envAdminUser || "").trim();
+const databaseUrl = process.env.DATABASE_URL || "";
+let poolPromise = null;
+let dbReadyPromise = null;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -39,6 +42,76 @@ async function readJson(file, fallback) {
 async function writeJson(file, data) {
   await mkdir(dataDir, { recursive: true });
   await writeFile(file, JSON.stringify(data, null, 2), "utf8");
+}
+
+async function getPool() {
+  if (!databaseUrl) {
+    return null;
+  }
+
+  if (!poolPromise) {
+    poolPromise = import("pg").then(({ Pool }) => new Pool({ connectionString: databaseUrl }));
+  }
+
+  const pool = await poolPromise;
+  if (!dbReadyPromise) {
+    dbReadyPromise = initializeDatabase(pool);
+  }
+  await dbReadyPromise;
+  return pool;
+}
+
+async function initializeDatabase(pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS news_items (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      category TEXT NOT NULL,
+      placement TEXT NOT NULL,
+      image TEXT,
+      author_name TEXT,
+      author_image TEXT,
+      summary TEXT NOT NULL,
+      body TEXT,
+      created_at BIGINT NOT NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_users (
+      username TEXT PRIMARY KEY,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'admin',
+      created_at BIGINT NOT NULL
+    )
+  `);
+
+  await migrateJsonDataToDatabase(pool);
+}
+
+async function migrateJsonDataToDatabase(pool) {
+  const { rows: newsCountRows } = await pool.query("SELECT COUNT(*)::int AS count FROM news_items");
+  if (newsCountRows[0]?.count === 0) {
+    const fileNews = await readJson(newsFile, []);
+    for (const item of fileNews) {
+      await saveNewsItemToDatabase(pool, normalizeItem(item));
+    }
+  }
+
+  const { rows: adminCountRows } = await pool.query("SELECT COUNT(*)::int AS count FROM admin_users");
+  if (adminCountRows[0]?.count === 0) {
+    const fileAdmins = await readJson(adminsFile, []);
+    for (const admin of fileAdmins) {
+      if (admin.username && admin.passwordHash) {
+        await pool.query(
+          `INSERT INTO admin_users (username, password_hash, role, created_at)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (username) DO NOTHING`,
+          [admin.username, admin.passwordHash, admin.role === "super_admin" ? "super_admin" : "admin", admin.createdAt || Date.now()]
+        );
+      }
+    }
+  }
 }
 
 async function readBody(request) {
@@ -108,8 +181,7 @@ async function sendIndex(response, request, url) {
 
   if (url.pathname.startsWith("/post/")) {
     const id = decodeURIComponent(url.pathname.replace("/post/", ""));
-    const news = await readJson(newsFile, []);
-    const item = news.find((entry) => entry.id === id);
+    const item = await getNewsItem(id);
     const title = escapeHtml(item?.title ? `${item.title} | مؤسسة الميزان السياسي` : "مؤسسة الميزان السياسي للأبحاث والترجمة الإعلامية");
     html = html
       .replace(/<title>.*?<\/title>/s, `<title>${title}</title>`)
@@ -140,7 +212,7 @@ async function requireSuperAdmin(request) {
 }
 
 async function getAdmins() {
-  const storedAdmins = await readJson(adminsFile, []);
+  const storedAdmins = await getStoredAdmins();
   const envAdmin = envAdminUser && envAdminPassword
     ? [{ username: envAdminUser, passwordHash: hashPassword(envAdminPassword), role: "super_admin", source: "env" }]
     : [];
@@ -178,9 +250,142 @@ function normalizeItem(item) {
   };
 }
 
+function dbNewsRowToItem(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    category: row.category,
+    placement: row.placement,
+    image: row.image || "",
+    authorName: row.author_name || "",
+    authorImage: row.author_image || "",
+    summary: row.summary,
+    body: row.body || "",
+    createdAt: Number(row.created_at)
+  };
+}
+
+async function getNewsItems() {
+  const pool = await getPool();
+  if (!pool) {
+    return readJson(newsFile, []);
+  }
+
+  const { rows } = await pool.query("SELECT * FROM news_items ORDER BY created_at DESC");
+  return rows.map(dbNewsRowToItem);
+}
+
+async function getNewsItem(id) {
+  const pool = await getPool();
+  if (!pool) {
+    const news = await readJson(newsFile, []);
+    return news.find((item) => item.id === id) || null;
+  }
+
+  const { rows } = await pool.query("SELECT * FROM news_items WHERE id = $1", [id]);
+  return rows[0] ? dbNewsRowToItem(rows[0]) : null;
+}
+
+async function saveNewsItemToDatabase(pool, item) {
+  await pool.query(
+    `INSERT INTO news_items (
+      id, title, category, placement, image, author_name, author_image, summary, body, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    ON CONFLICT (id) DO UPDATE SET
+      title = EXCLUDED.title,
+      category = EXCLUDED.category,
+      placement = EXCLUDED.placement,
+      image = EXCLUDED.image,
+      author_name = EXCLUDED.author_name,
+      author_image = EXCLUDED.author_image,
+      summary = EXCLUDED.summary,
+      body = EXCLUDED.body`,
+    [
+      item.id,
+      item.title,
+      item.category,
+      item.placement,
+      item.image,
+      item.authorName,
+      item.authorImage,
+      item.summary,
+      item.body,
+      item.createdAt
+    ]
+  );
+}
+
+async function saveNewsItem(item) {
+  const pool = await getPool();
+  if (!pool) {
+    const news = await readJson(newsFile, []);
+    const existing = news.find((entry) => entry.id === item.id);
+    const next = existing ? news.map((entry) => entry.id === item.id ? { ...entry, ...item, createdAt: entry.createdAt } : entry) : [item, ...news];
+    await writeJson(newsFile, next);
+    return;
+  }
+
+  const existing = await getNewsItem(item.id);
+  await saveNewsItemToDatabase(pool, { ...item, createdAt: existing?.createdAt || item.createdAt });
+}
+
+async function deleteNewsItem(id) {
+  const pool = await getPool();
+  if (!pool) {
+    const news = await readJson(newsFile, []);
+    await writeJson(newsFile, news.filter((item) => item.id !== id));
+    return;
+  }
+
+  await pool.query("DELETE FROM news_items WHERE id = $1", [id]);
+}
+
+async function getStoredAdmins() {
+  const pool = await getPool();
+  if (!pool) {
+    return readJson(adminsFile, []);
+  }
+
+  const { rows } = await pool.query("SELECT username, password_hash, role, created_at FROM admin_users ORDER BY created_at DESC");
+  return rows.map((row) => ({
+    username: row.username,
+    passwordHash: row.password_hash,
+    role: row.role,
+    createdAt: Number(row.created_at),
+    source: "stored"
+  }));
+}
+
+async function addStoredAdmin(admin) {
+  const pool = await getPool();
+  if (!pool) {
+    const storedAdmins = await readJson(adminsFile, []);
+    storedAdmins.push(admin);
+    await writeJson(adminsFile, storedAdmins);
+    return;
+  }
+
+  await pool.query(
+    `INSERT INTO admin_users (username, password_hash, role, created_at)
+     VALUES ($1, $2, $3, $4)`,
+    [admin.username, admin.passwordHash, admin.role, admin.createdAt]
+  );
+}
+
+async function deleteStoredAdmin(username) {
+  const pool = await getPool();
+  if (!pool) {
+    const storedAdmins = await readJson(adminsFile, []);
+    await writeJson(adminsFile, storedAdmins.filter((admin) => admin.username !== username));
+    return;
+  }
+
+  await pool.query("DELETE FROM admin_users WHERE username = $1", [username]);
+}
+
 async function handleApi(request, response, url) {
   if (url.pathname === "/api/news" && request.method === "GET") {
-    return sendJson(response, 200, await readJson(newsFile, []));
+    return sendJson(response, 200, await getNewsItems());
   }
 
   if (url.pathname === "/api/admins/login" && request.method === "POST") {
@@ -214,10 +419,9 @@ async function handleApi(request, response, url) {
       return sendJson(response, 409, { error: "Admin already exists" });
     }
 
-    const storedAdmins = await readJson(adminsFile, []);
-    storedAdmins.push({ username, passwordHash: hashPassword(password), role, createdAt: Date.now() });
-    await writeJson(adminsFile, storedAdmins);
-    return sendJson(response, 201, { username, role, source: "stored", createdAt: Date.now() });
+    const createdAt = Date.now();
+    await addStoredAdmin({ username, passwordHash: hashPassword(password), role, createdAt });
+    return sendJson(response, 201, { username, role, source: "stored", createdAt });
   }
 
   if (url.pathname.startsWith("/api/admins/") && request.method === "DELETE") {
@@ -232,8 +436,7 @@ async function handleApi(request, response, url) {
       return sendJson(response, 400, { error: "Cannot delete current admin" });
     }
 
-    const storedAdmins = await readJson(adminsFile, []);
-    await writeJson(adminsFile, storedAdmins.filter((admin) => admin.username !== username));
+    await deleteStoredAdmin(username);
     return sendJson(response, 200, { ok: true });
   }
 
@@ -245,18 +448,14 @@ async function handleApi(request, response, url) {
       return sendJson(response, 400, { error: "Missing title or summary" });
     }
 
-    const news = await readJson(newsFile, []);
-    const existing = news.find((entry) => entry.id === item.id);
-    const next = existing ? news.map((entry) => entry.id === item.id ? { ...entry, ...item, createdAt: entry.createdAt } : entry) : [item, ...news];
-    await writeJson(newsFile, next);
+    await saveNewsItem(item);
     return sendJson(response, 200, item);
   }
 
   if (url.pathname.startsWith("/api/news/") && request.method === "DELETE") {
     await requireAdmin(request);
     const id = decodeURIComponent(url.pathname.replace("/api/news/", ""));
-    const news = await readJson(newsFile, []);
-    await writeJson(newsFile, news.filter((item) => item.id !== id));
+    await deleteNewsItem(id);
     return sendJson(response, 200, { ok: true });
   }
 
