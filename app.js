@@ -282,18 +282,36 @@ function renderLeads() {
   `;
 }
 
-function postHash(id) {
-  return `#post/${encodeURIComponent(id)}`;
+function postPath(id) {
+  return `/post/${encodeURIComponent(id)}`;
+}
+
+function postRoute(id) {
+  return location.protocol === "file:" ? `#post/${encodeURIComponent(id)}` : postPath(id);
 }
 
 function fullPostUrl(id) {
   const url = new URL(location.href);
-  url.hash = postHash(id).slice(1);
+  if (url.protocol === "file:") {
+    url.hash = `post/${encodeURIComponent(id)}`;
+  } else {
+    url.pathname = postPath(id);
+    url.hash = "";
+    url.search = "";
+  }
   return url.href;
 }
 
-function getPostIdFromHash() {
-  return location.hash.startsWith("#post/") ? decodeURIComponent(location.hash.replace("#post/", "")) : "";
+function getPostIdFromLocation() {
+  if (location.hash.startsWith("#post/")) {
+    return decodeURIComponent(location.hash.replace("#post/", ""));
+  }
+
+  if (location.pathname.startsWith("/post/")) {
+    return decodeURIComponent(location.pathname.replace("/post/", ""));
+  }
+
+  return "";
 }
 
 function setHomeVisibility(isHome) {
@@ -414,8 +432,9 @@ function authorBlock(item) {
 }
 
 function renderSite() {
-  if (getPostIdFromHash()) {
-    renderPostView(getPostIdFromHash());
+  const postId = getPostIdFromLocation();
+  if (postId) {
+    renderPostView(postId);
     return;
   }
   document.title = "مؤسسة الميزان السياسي للأبحاث والترجمة الإعلامية";
@@ -573,12 +592,14 @@ function readImage(form) {
 document.addEventListener("click", async (event) => {
   const postLink = event.target.closest("[data-open-post]");
   if (postLink) {
-    location.hash = postHash(postLink.dataset.openPost);
+    history.pushState(null, "", postRoute(postLink.dataset.openPost));
+    renderSite();
+    window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
 
   if (event.target.closest("[data-back-home]")) {
-    history.pushState(null, "", location.pathname + location.search);
+    history.pushState(null, "", location.protocol === "file:" ? location.pathname + location.search : "/");
     renderSite();
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
@@ -609,8 +630,8 @@ document.addEventListener("click", async (event) => {
     activeView = viewButton.dataset.view;
     searchTerm = "";
     document.querySelector("#searchInput").value = "";
-    if (getPostIdFromHash()) {
-      history.pushState(null, "", location.pathname + location.search);
+    if (getPostIdFromLocation()) {
+      history.pushState(null, "", location.protocol === "file:" ? location.pathname + location.search : "/");
     }
     renderSite();
   }
@@ -680,7 +701,8 @@ document.addEventListener("keydown", (event) => {
   const postLink = event.target.closest?.("[data-open-post]");
   if (postLink && (event.key === "Enter" || event.key === " ")) {
     event.preventDefault();
-    location.hash = postHash(postLink.dataset.openPost);
+    history.pushState(null, "", postRoute(postLink.dataset.openPost));
+    renderSite();
   }
 });
 
@@ -820,6 +842,8 @@ window.addEventListener("hashchange", () => {
   }
   renderSite();
 });
+
+window.addEventListener("popstate", renderSite);
 
 async function initApp() {
   await syncNewsFromServer();

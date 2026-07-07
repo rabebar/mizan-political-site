@@ -1,6 +1,5 @@
 import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createReadStream } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,6 +59,65 @@ function sendJson(response, status, data) {
 
 function sendError(response, error) {
   sendJson(response, error.status || 500, { error: error.message || "Server error" });
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function absoluteUrl(request, pathOrUrl) {
+  if (!pathOrUrl) {
+    return "";
+  }
+
+  if (/^https?:\/\//i.test(pathOrUrl)) {
+    return pathOrUrl;
+  }
+
+  const protocol = request.headers["x-forwarded-proto"] || "https";
+  return `${protocol}://${request.headers.host}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
+}
+
+function metaTagsForPost(request, item, url) {
+  const siteTitle = "مؤسسة الميزان السياسي للأبحاث والترجمة الإعلامية";
+  const title = item?.title || siteTitle;
+  const description = item?.summary || "ترجمات دقيقة وتحليل سياسي علمي بعيدًا عن الضجيج.";
+  const image = item?.image && !String(item.image).startsWith("data:") ? absoluteUrl(request, item.image) : "";
+  const canonicalUrl = absoluteUrl(request, url.pathname);
+
+  return `
+  <link rel="canonical" href="${escapeHtml(canonicalUrl)}">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="${escapeHtml(siteTitle)}">
+  <meta property="og:title" content="${escapeHtml(title)}">
+  <meta property="og:description" content="${escapeHtml(description)}">
+  <meta property="og:url" content="${escapeHtml(canonicalUrl)}">
+  ${image ? `<meta property="og:image" content="${escapeHtml(image)}">` : ""}
+  <meta name="twitter:card" content="${image ? "summary_large_image" : "summary"}">
+  <meta name="twitter:title" content="${escapeHtml(title)}">
+  <meta name="twitter:description" content="${escapeHtml(description)}">
+  ${image ? `<meta name="twitter:image" content="${escapeHtml(image)}">` : ""}`;
+}
+
+async function sendIndex(response, request, url) {
+  let html = await readFile(join(root, "index.html"), "utf8");
+
+  if (url.pathname.startsWith("/post/")) {
+    const id = decodeURIComponent(url.pathname.replace("/post/", ""));
+    const news = await readJson(newsFile, []);
+    const item = news.find((entry) => entry.id === id);
+    const title = escapeHtml(item?.title ? `${item.title} | مؤسسة الميزان السياسي` : "مؤسسة الميزان السياسي للأبحاث والترجمة الإعلامية");
+    html = html
+      .replace(/<title>.*?<\/title>/s, `<title>${title}</title>`)
+      .replace("</head>", `${metaTagsForPost(request, item, url)}\n</head>`);
+  }
+
+  response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  response.end(html);
 }
 
 async function requireAdmin(request) {
@@ -205,7 +263,12 @@ async function handleApi(request, response, url) {
   return sendJson(response, 404, { error: "Not found" });
 }
 
-function serveStatic(request, response, url) {
+async function serveStatic(request, response, url) {
+  if (url.pathname === "/" || url.pathname.startsWith("/post/")) {
+    await sendIndex(response, request, url);
+    return;
+  }
+
   const relativePath = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
   const filePath = normalize(join(root, relativePath));
 
@@ -215,12 +278,13 @@ function serveStatic(request, response, url) {
     return;
   }
 
-  const stream = createReadStream(filePath);
-  stream.on("error", () => {
-    createReadStream(join(root, "index.html")).pipe(response);
-  });
-  response.writeHead(200, { "content-type": mimeTypes[extname(filePath)] || "application/octet-stream" });
-  stream.pipe(response);
+  try {
+    const content = await readFile(filePath);
+    response.writeHead(200, { "content-type": mimeTypes[extname(filePath)] || "application/octet-stream" });
+    response.end(content);
+  } catch {
+    await sendIndex(response, request, url);
+  }
 }
 
 createServer(async (request, response) => {
@@ -230,7 +294,7 @@ createServer(async (request, response) => {
       await handleApi(request, response, url);
       return;
     }
-    serveStatic(request, response, url);
+    await serveStatic(request, response, url);
   } catch (error) {
     sendError(response, error);
   }
