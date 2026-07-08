@@ -225,6 +225,16 @@ async function fetchAdminsFromServer() {
   });
 }
 
+async function fetchAnalyticsFromServer() {
+  if (!serverMode || currentAdminRole !== "super_admin") {
+    return null;
+  }
+
+  return apiRequest("/api/analytics", {
+    headers: adminHeaders()
+  });
+}
+
 async function createAdminOnServer(admin) {
   return apiRequest("/api/admins", {
     method: "POST",
@@ -485,6 +495,7 @@ function renderAdminState() {
     }
     renderAdminNews();
     renderAdminUsers();
+    renderAnalytics();
   }
 }
 
@@ -562,6 +573,81 @@ async function renderAdminUsers() {
   } catch {
     list.innerHTML = "";
     message.textContent = "تعذر تحميل قائمة المدراء.";
+  }
+}
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString("ar");
+}
+
+async function renderAnalytics() {
+  const cards = document.querySelector("#analyticsCards");
+  const topPostsList = document.querySelector("#topPostsList");
+  const categoryStatsList = document.querySelector("#categoryStatsList");
+  const message = document.querySelector("#analyticsMessage");
+
+  if (!cards || currentAdminRole !== "super_admin") {
+    return;
+  }
+
+  if (!serverMode) {
+    cards.innerHTML = "";
+    topPostsList.innerHTML = "";
+    categoryStatsList.innerHTML = "";
+    message.textContent = "الإحصائيات تعمل على النسخة المنشورة المرتبطة بقاعدة البيانات فقط.";
+    return;
+  }
+
+  cards.innerHTML = `
+    <div class="analytics-card"><strong>...</strong><span>إجمالي الزيارات</span></div>
+    <div class="analytics-card"><strong>...</strong><span>آخر 24 ساعة</span></div>
+    <div class="analytics-card"><strong>...</strong><span>آخر 7 أيام</span></div>
+    <div class="analytics-card"><strong>...</strong><span>آخر 30 يوماً</span></div>
+  `;
+  topPostsList.innerHTML = `<p class="note">جاري تحميل الأكثر قراءة...</p>`;
+  categoryStatsList.innerHTML = "";
+  message.textContent = "";
+
+  try {
+    const data = await fetchAnalyticsFromServer();
+    const totals = data?.totals || {};
+    cards.innerHTML = `
+      <div class="analytics-card"><strong>${formatNumber(totals.total)}</strong><span>إجمالي الزيارات</span></div>
+      <div class="analytics-card"><strong>${formatNumber(totals.last24h)}</strong><span>آخر 24 ساعة</span></div>
+      <div class="analytics-card"><strong>${formatNumber(totals.last7d)}</strong><span>آخر 7 أيام</span></div>
+      <div class="analytics-card"><strong>${formatNumber(totals.last30d)}</strong><span>آخر 30 يوماً</span></div>
+    `;
+
+    topPostsList.innerHTML = data.topPosts?.length
+      ? data.topPosts.map((item) => `
+        <div class="analytics-row">
+          <div>
+            <strong>${item.title}</strong>
+            <span>${categoryNames[item.category] || "مادة منشورة"}</span>
+          </div>
+          <div class="analytics-count">${formatNumber(item.visits)}</div>
+        </div>
+      `).join("")
+      : `<p class="note">لا توجد زيارات لمواد منشورة بعد.</p>`;
+
+    categoryStatsList.innerHTML = data.categories?.length
+      ? data.categories.map((item) => `
+        <div class="analytics-row">
+          <div>
+            <strong>${categoryNames[item.category] || item.category || "الرئيسية"}</strong>
+            <span>زيارات مسجلة</span>
+          </div>
+          <div class="analytics-count">${formatNumber(item.visits)}</div>
+        </div>
+      `).join("")
+      : `<p class="note">لا توجد زيارات مسجلة بعد.</p>`;
+
+    message.textContent = "الأرقام تستبعد زيارات المعاينة الآلية قدر الإمكان، وتدمج تكرار نفس الزائر لنفس الصفحة خلال 30 دقيقة.";
+  } catch {
+    cards.innerHTML = "";
+    topPostsList.innerHTML = "";
+    categoryStatsList.innerHTML = "";
+    message.textContent = "تعذر تحميل الإحصائيات. تأكد من تسجيل الدخول كسوبر أدمن.";
   }
 }
 

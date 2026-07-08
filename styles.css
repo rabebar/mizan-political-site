@@ -750,6 +750,77 @@ textarea { resize: vertical; }
   font-size: 13.5px;
 }
 
+.analytics-section {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 18px;
+  padding-bottom: 18px;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.analytics-card {
+  border: 1px solid var(--line);
+  background: var(--primary);
+  padding: 12px;
+}
+
+.analytics-card strong {
+  display: block;
+  color: var(--primary-strong);
+  font-family: var(--font-display);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.analytics-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 7px;
+}
+
+.analytics-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.analytics-columns h4 {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+}
+
+.analytics-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding: 10px 0;
+}
+
+.analytics-row strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analytics-row span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.analytics-count {
+  color: var(--primary-strong);
+  font-weight: 800;
+}
+
 .admin-user-form {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(180px, .8fr) minmax(150px, .55fr) auto;
@@ -826,6 +897,8 @@ textarea { resize: vertical; }
 
   .search-box { width: 100%; }
   .main-story { min-height: 360px; }
+  .analytics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .analytics-columns { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 620px) {
@@ -839,6 +912,8 @@ textarea { resize: vertical; }
   .story-overlay { padding: 22px; }
   .side-card { grid-template-columns: 112px minmax(0, 1fr); }
   .editor { grid-template-columns: 1fr; }
+  .analytics-grid { grid-template-columns: 1fr; }
+  .admin-user-form { grid-template-columns: 1fr; }
   .post-actions {
     align-items: stretch;
     flex-direction: column;

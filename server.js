@@ -86,6 +86,22 @@ async function initializeDatabase(pool) {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS visit_events (
+      id TEXT PRIMARY KEY,
+      path TEXT NOT NULL,
+      post_id TEXT,
+      category TEXT,
+      visitor_hash TEXT NOT NULL,
+      user_agent_hash TEXT NOT NULL,
+      created_at BIGINT NOT NULL
+    )
+  `);
+
+  await pool.query("CREATE INDEX IF NOT EXISTS visit_events_created_at_idx ON visit_events(created_at)");
+  await pool.query("CREATE INDEX IF NOT EXISTS visit_events_post_id_idx ON visit_events(post_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS visit_events_recent_idx ON visit_events(visitor_hash, user_agent_hash, path, created_at)");
+
   await migrateJsonDataToDatabase(pool);
 }
 
@@ -178,18 +194,72 @@ function metaTagsForPost(request, item, url) {
 
 async function sendIndex(response, request, url) {
   let html = await readFile(join(root, "index.html"), "utf8");
+  let item = null;
 
   if (url.pathname.startsWith("/post/")) {
     const id = decodeURIComponent(url.pathname.replace("/post/", ""));
-    const item = await getNewsItem(id);
+    item = await getNewsItem(id);
     const title = escapeHtml(item?.title ? `${item.title} | مؤسسة الميزان السياسي` : "مؤسسة الميزان السياسي للأبحاث والترجمة الإعلامية");
     html = html
       .replace(/<title>.*?<\/title>/s, `<title>${title}</title>`)
       .replace("</head>", `${metaTagsForPost(request, item, url)}\n</head>`);
   }
 
+  await recordVisit(request, url, item);
   response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   response.end(html);
+}
+
+function isLikelyBot(request) {
+  const userAgent = String(request.headers["user-agent"] || "");
+  return /bot|crawler|spider|preview|facebookexternalhit|whatsapp|telegrambot|twitterbot|slackbot|discordbot|linkedinbot|googlebot|bingbot|duckduckbot/i.test(userAgent);
+}
+
+function hashVisitValue(value) {
+  return createHash("sha256").update(String(value || "")).digest("hex");
+}
+
+function clientIp(request) {
+  const forwardedFor = String(request.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return forwardedFor || request.socket.remoteAddress || "unknown";
+}
+
+async function recordVisit(request, url, item = null) {
+  if (request.method !== "GET" || isLikelyBot(request)) {
+    return;
+  }
+
+  const isPostPath = url.pathname.startsWith("/post/");
+  if (isPostPath && !item) {
+    return;
+  }
+
+  const pool = await getPool();
+  if (!pool) {
+    return;
+  }
+
+  const path = isPostPath ? url.pathname : "/";
+  const salt = process.env.VISIT_HASH_SALT || envAdminPassword || "mizan-political";
+  const visitorHash = hashVisitValue(`${salt}:${clientIp(request)}`);
+  const userAgentHash = hashVisitValue(request.headers["user-agent"] || "");
+  const recentWindow = Date.now() - 30 * 60 * 1000;
+  const { rows } = await pool.query(
+    `SELECT id FROM visit_events
+     WHERE visitor_hash = $1 AND user_agent_hash = $2 AND path = $3 AND created_at >= $4
+     LIMIT 1`,
+    [visitorHash, userAgentHash, path, recentWindow]
+  );
+
+  if (rows.length) {
+    return;
+  }
+
+  await pool.query(
+    `INSERT INTO visit_events (id, path, post_id, category, visitor_hash, user_agent_hash, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [randomUUID(), path, item?.id || null, item?.category || (path === "/" ? "home" : null), visitorHash, userAgentHash, Date.now()]
+  );
 }
 
 async function requireAdmin(request) {
@@ -383,9 +453,68 @@ async function deleteStoredAdmin(username) {
   await pool.query("DELETE FROM admin_users WHERE username = $1", [username]);
 }
 
+function emptyAnalytics() {
+  return {
+    totals: { total: 0, last24h: 0, last7d: 0, last30d: 0 },
+    topPosts: [],
+    categories: []
+  };
+}
+
+async function getAnalyticsSummary() {
+  const pool = await getPool();
+  if (!pool) {
+    return emptyAnalytics();
+  }
+
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  const { rows: totalRows } = await pool.query(
+    `SELECT
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE created_at >= $1)::int AS last24h,
+      COUNT(*) FILTER (WHERE created_at >= $2)::int AS last7d,
+      COUNT(*) FILTER (WHERE created_at >= $3)::int AS last30d
+     FROM visit_events`,
+    [now - day, now - 7 * day, now - 30 * day]
+  );
+
+  const { rows: topPosts } = await pool.query(
+    `SELECT
+      v.post_id AS id,
+      COALESCE(n.title, v.post_id) AS title,
+      COALESCE(n.category, v.category) AS category,
+      COUNT(*)::int AS visits
+     FROM visit_events v
+     LEFT JOIN news_items n ON n.id = v.post_id
+     WHERE v.post_id IS NOT NULL
+     GROUP BY v.post_id, n.title, n.category, v.category
+     ORDER BY visits DESC
+     LIMIT 8`
+  );
+
+  const { rows: categories } = await pool.query(
+    `SELECT
+      COALESCE(n.category, v.category, 'home') AS category,
+      COUNT(*)::int AS visits
+     FROM visit_events v
+     LEFT JOIN news_items n ON n.id = v.post_id
+     GROUP BY COALESCE(n.category, v.category, 'home')
+     ORDER BY visits DESC`
+  );
+
+  const totals = totalRows[0] || emptyAnalytics().totals;
+  return { totals, topPosts, categories };
+}
+
 async function handleApi(request, response, url) {
   if (url.pathname === "/api/news" && request.method === "GET") {
     return sendJson(response, 200, await getNewsItems());
+  }
+
+  if (url.pathname === "/api/analytics" && request.method === "GET") {
+    await requireSuperAdmin(request);
+    return sendJson(response, 200, await getAnalyticsSummary());
   }
 
   if (url.pathname === "/api/admins/login" && request.method === "POST") {
