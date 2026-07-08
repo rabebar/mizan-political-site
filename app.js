@@ -18,6 +18,7 @@ let currentAdminRole = localStorage.getItem("mizan_current_admin_role") || "admi
 let searchTerm = "";
 let serverMode = false;
 let editingNewsId = "";
+let activeAdminTab = "overview";
 
 function makeId() {
   return crypto.randomUUID?.() || `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -485,18 +486,79 @@ function renderAdminState() {
   const dashboard = document.querySelector("#dashboard");
   const currentAdminEl = document.querySelector("#currentAdmin");
   const superPanel = document.querySelector("#superAdminPanel");
+  const analyticsSection = document.querySelector("#analyticsSection");
+  const superNav = document.querySelector("[data-super-admin-nav]");
+  const overviewPanel = document.querySelector("#adminOverviewPanel");
   authView.classList.toggle("hidden", Boolean(currentAdmin));
   dashboard.classList.toggle("hidden", !currentAdmin);
   superPanel.classList.toggle("hidden", currentAdminRole !== "super_admin");
+  analyticsSection?.classList.toggle("hidden", currentAdminRole !== "super_admin");
+  superNav?.classList.toggle("hidden", currentAdminRole !== "super_admin");
   currentAdminEl.textContent = currentAdmin ? `مرحبًا، ${currentAdmin} · ${roleName(currentAdminRole)}` : "";
   if (currentAdmin) {
+    if (currentAdminRole !== "super_admin" && activeAdminTab === "permissions") {
+      activeAdminTab = "overview";
+    }
     if (!editingNewsId) {
       setEditorMode();
     }
+    if (overviewPanel && analyticsSection && analyticsSection.parentElement !== overviewPanel) {
+      overviewPanel.appendChild(analyticsSection);
+    }
+    renderAdminTabs();
+    renderAdminSummary();
     renderAdminNews();
     renderAdminUsers();
     renderAnalytics();
   }
+}
+
+function renderAdminTabs() {
+  document.querySelectorAll("[data-admin-tab]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.adminTab === activeAdminTab);
+  });
+
+  document.querySelectorAll("[data-admin-panel]").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.adminPanel !== activeAdminTab);
+  });
+
+  if (activeAdminTab === "permissions" && currentAdminRole === "super_admin") {
+    document.querySelector("#superAdminPanel")?.classList.remove("hidden");
+  }
+
+  if (activeAdminTab === "overview" && currentAdminRole === "super_admin") {
+    document.querySelector("#analyticsSection")?.classList.remove("hidden");
+  }
+}
+
+function renderAdminSummary() {
+  const cards = document.querySelector("#adminSummaryCards");
+  if (!cards) {
+    return;
+  }
+
+  const news = getNews();
+  const articlesCount = news.filter((item) => item.category === "articles").length;
+  const mainCount = news.filter((item) => item.placement === "main" || item.placement === "after-main-1" || item.placement === "after-main-2").length;
+  const latest = news.slice().sort((a, b) => b.createdAt - a.createdAt)[0];
+  cards.innerHTML = `
+    <div class="summary-card">
+      <strong>${formatNumber(news.length)}</strong>
+      <span>كل المواد المنشورة</span>
+    </div>
+    <div class="summary-card">
+      <strong>${formatNumber(articlesCount)}</strong>
+      <span>مقالات</span>
+    </div>
+    <div class="summary-card">
+      <strong>${formatNumber(mainCount)}</strong>
+      <span>مواد في الواجهة الرئيسية</span>
+    </div>
+    <div class="summary-card summary-card--wide">
+      <strong>${latest ? latest.title : "لا توجد مواد بعد"}</strong>
+      <span>آخر مادة منشورة</span>
+    </div>
+  `;
 }
 
 function renderAdminNews() {
@@ -740,6 +802,17 @@ document.addEventListener("click", async (event) => {
     closeAdmin();
   }
 
+  const adminTab = event.target.closest("[data-admin-tab]");
+  if (adminTab) {
+    activeAdminTab = adminTab.dataset.adminTab;
+    renderAdminTabs();
+    if (activeAdminTab === "overview") {
+      renderAdminSummary();
+      renderAnalytics();
+    }
+    return;
+  }
+
   if (event.target.closest("[data-logout]")) {
     currentAdmin = "";
     currentAdminPassword = "";
@@ -774,6 +847,7 @@ document.addEventListener("click", async (event) => {
     }
     renderSite();
     renderAdminNews();
+    renderAdminSummary();
   }
 
   const editButton = event.target.closest("[data-edit]");
@@ -785,6 +859,8 @@ document.addEventListener("click", async (event) => {
     const form = document.querySelector("#newsForm");
     const fields = form.elements;
     setEditorMode(item);
+    activeAdminTab = "editor";
+    renderAdminTabs();
     fields.title.value = item.title;
     fields.category.value = item.category;
     fields.placement.value = item.placement;
@@ -919,6 +995,7 @@ document.querySelector("#newsForm").addEventListener("submit", async (event) => 
   setEditorMode();
   renderSite();
   renderAdminNews();
+  renderAdminSummary();
 });
 
 document.querySelector("#newsForm").addEventListener("reset", (event) => {

@@ -118,12 +118,30 @@
         <button class="ghost" type="button" data-logout>تسجيل خروج</button>
       </div>
 
-      <div class="editor-state" id="editorState">
+      <aside class="admin-sidebar" aria-label="أقسام لوحة الإدارة">
+        <button class="admin-nav-item is-active" type="button" data-admin-tab="overview">نظرة عامة</button>
+        <button class="admin-nav-item" type="button" data-admin-tab="editor">تحرير مادة</button>
+        <button class="admin-nav-item" type="button" data-admin-tab="materials">كل المواد</button>
+        <button class="admin-nav-item" type="button" data-admin-tab="permissions" data-super-admin-nav>السوبر أدمن</button>
+      </aside>
+
+      <section class="admin-overview" id="adminOverviewPanel" data-admin-panel="overview">
+        <div class="panel-head">
+          <div>
+            <p class="kicker">غرفة التحرير</p>
+            <h3>نظرة عامة على الموقع</h3>
+          </div>
+          <span>ملخص سريع لحالة النشر قبل الدخول إلى التحرير أو الصلاحيات.</span>
+        </div>
+        <div class="summary-grid" id="adminSummaryCards"></div>
+      </section>
+
+      <div class="editor-state" id="editorState" data-admin-panel="editor">
         <strong>إضافة مادة جديدة</strong>
         <span>سيتم نشر مادة جديدة ولن يتم تعديل أي مادة منشورة.</span>
       </div>
 
-      <section class="super-admin-panel hidden" id="superAdminPanel">
+      <section class="super-admin-panel hidden" id="superAdminPanel" data-admin-panel="permissions">
         <section class="analytics-section" id="analyticsSection">
           <div class="panel-head">
             <div>
@@ -173,7 +191,7 @@
         <div id="adminUsersList"></div>
       </section>
 
-      <form class="editor" id="newsForm">
+      <form class="editor" id="newsForm" data-admin-panel="editor">
         <input type="hidden" name="id">
         <label>العنوان
           <input name="title" required>
@@ -216,7 +234,7 @@
         </div>
       </form>
 
-      <div class="manage-list">
+      <div class="manage-list" data-admin-panel="materials">
         <h3>كل المواد المنشورة</h3>
         <div id="adminNewsList"></div>
       </div>
