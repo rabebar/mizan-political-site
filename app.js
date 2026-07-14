@@ -180,13 +180,13 @@ async function apiRequest(path, options = {}) {
   return data;
 }
 
-async function syncNewsFromServer() {
+async function syncNewsFromServer(includeAdminData = false) {
   if (location.protocol === "file:") {
     return false;
   }
 
   try {
-    const news = await apiRequest("/api/news");
+    const news = await apiRequest("/api/news", includeAdminData ? { headers: adminHeaders() } : {});
     if (Array.isArray(news)) {
       serverMode = true;
       serverNews = news.length ? news : seedNews;
@@ -964,6 +964,8 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
       localStorage.setItem("mizan_current_admin_role", currentAdminRole);
       sessionStorage.setItem("mizan_current_admin_password", currentAdminPassword);
       form.reset();
+      await syncNewsFromServer(true);
+      renderSite();
       renderAdminState();
       return;
     } catch {

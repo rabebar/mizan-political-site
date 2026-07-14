@@ -207,7 +207,7 @@ async function sendIndex(response, request, url) {
   let initialNews = [];
 
   try {
-    initialNews = await getNewsItems();
+    initialNews = (await getNewsItems()).map(publicNewsItem);
   } catch (error) {
     console.error("Initial news load failed:", error.message);
   }
@@ -362,6 +362,18 @@ function dbNewsRowToItem(row) {
     summary: row.summary,
     body: row.body || "",
     createdAt: Number(row.created_at)
+  };
+}
+
+function stripEmbeddedImage(value) {
+  return String(value || "").startsWith("data:") ? "" : value || "";
+}
+
+function publicNewsItem(item) {
+  return {
+    ...item,
+    image: stripEmbeddedImage(item.image),
+    authorImage: stripEmbeddedImage(item.authorImage)
   };
 }
 
@@ -539,7 +551,12 @@ async function getAnalyticsSummary() {
 
 async function handleApi(request, response, url) {
   if (url.pathname === "/api/news" && request.method === "GET") {
-    return sendJson(response, 200, await getNewsItems());
+    const news = await getNewsItems();
+    if (request.headers["x-admin-user"] || request.headers["x-admin-pass"]) {
+      await requireAdmin(request);
+      return sendJson(response, 200, news);
+    }
+    return sendJson(response, 200, news.map(publicNewsItem));
   }
 
   if (url.pathname === "/api/analytics" && request.method === "GET") {
