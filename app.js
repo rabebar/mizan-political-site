@@ -987,8 +987,8 @@ document.querySelector("#newsForm").addEventListener("submit", async (event) => 
     } else {
       setNews(existing ? news.map((newsItem) => newsItem.id === id ? item : newsItem) : [item, ...news]);
     }
-  } catch {
-    alert("تعذر حفظ الخبر على السيرفر. تأكد من تسجيل الدخول وحجم الصور.");
+  } catch (error) {
+    alert(error.message || "تعذر حفظ الخبر على السيرفر. تأكد من تسجيل الدخول وحجم الصور.");
     return;
   }
   form.reset();
@@ -999,8 +999,9 @@ document.querySelector("#newsForm").addEventListener("submit", async (event) => 
 });
 
 document.querySelector("#newsForm").addEventListener("reset", (event) => {
+  const form = event.currentTarget;
   setTimeout(() => {
-    event.currentTarget.elements.id.value = "";
+    form.elements.id.value = "";
     setEditorMode();
   });
 });
