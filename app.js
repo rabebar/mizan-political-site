@@ -244,6 +244,10 @@ function adminHeaders() {
   };
 }
 
+function hasActiveSuperAdminSession() {
+  return Boolean(serverMode && currentAdmin && currentAdminPassword && currentAdminRole === "super_admin");
+}
+
 async function loginViaServer(username, password) {
   if (!serverMode) {
     return false;
@@ -255,7 +259,7 @@ async function loginViaServer(username, password) {
 }
 
 async function fetchAdminsFromServer() {
-  if (!serverMode || currentAdminRole !== "super_admin") {
+  if (!hasActiveSuperAdminSession()) {
     return [];
   }
 
@@ -265,7 +269,7 @@ async function fetchAdminsFromServer() {
 }
 
 async function fetchAnalyticsFromServer() {
-  if (!serverMode || currentAdminRole !== "super_admin") {
+  if (!hasActiveSuperAdminSession()) {
     return null;
   }
 
@@ -651,6 +655,12 @@ async function renderAdminUsers() {
     return;
   }
 
+  if (!currentAdminPassword) {
+    list.innerHTML = "";
+    message.textContent = "";
+    return;
+  }
+
   if (!serverMode) {
     list.innerHTML = `<p class="note">إدارة المدراء تعمل على النسخة المنشورة فقط.</p>`;
     return;
@@ -687,6 +697,14 @@ async function renderAnalytics() {
   const message = document.querySelector("#analyticsMessage");
 
   if (!cards || currentAdminRole !== "super_admin") {
+    return;
+  }
+
+  if (!currentAdminPassword) {
+    cards.innerHTML = "";
+    topPostsList.innerHTML = "";
+    categoryStatsList.innerHTML = "";
+    message.textContent = "";
     return;
   }
 
