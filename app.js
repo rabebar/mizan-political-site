@@ -21,6 +21,26 @@ let serverNews = null;
 let editingNewsId = "";
 let activeAdminTab = "overview";
 
+function loadInitialServerNews() {
+  const initialNewsScript = document.querySelector("#initialNewsData");
+  if (!initialNewsScript?.textContent) {
+    return false;
+  }
+
+  try {
+    const news = JSON.parse(initialNewsScript.textContent);
+    if (Array.isArray(news)) {
+      serverMode = true;
+      serverNews = news;
+      return true;
+    }
+  } catch (error) {
+    console.warn("Initial news payload could not be parsed:", error);
+  }
+
+  return false;
+}
+
 function makeId() {
   return crypto.randomUUID?.() || `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -111,6 +131,9 @@ function getNews() {
   if (serverMode && Array.isArray(serverNews)) {
     return serverNews;
   }
+  if (location.protocol !== "file:") {
+    return Array.isArray(serverNews) ? serverNews : [];
+  }
   try {
     const stored = localStorage.getItem(newsKey);
     if (!stored) {
@@ -128,8 +151,8 @@ function setNews(news) {
   try {
     localStorage.setItem(newsKey, JSON.stringify(news));
     return true;
-  } catch {
-    alert("تعذر حفظ الخبر في المتصفح. جرّب استخدام صورة أصغر أو رابط صورة بدل الرفع.");
+  } catch (error) {
+    console.warn("Local news cache could not be saved:", error);
     return false;
   }
 }
@@ -170,7 +193,7 @@ async function syncNewsFromServer() {
       return true;
     }
   } catch {
-    serverMode = false;
+    serverMode = Array.isArray(serverNews);
   }
   return false;
 }
@@ -1039,9 +1062,14 @@ window.addEventListener("hashchange", () => {
 window.addEventListener("popstate", renderSite);
 
 async function initApp() {
-  await syncNewsFromServer();
+  loadInitialServerNews();
   fillCategorySelect();
   renderSite();
+
+  const synced = await syncNewsFromServer();
+  if (synced) {
+    renderSite();
+  }
 
   if (location.hash === "#admin") {
     openAdmin();

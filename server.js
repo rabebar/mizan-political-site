@@ -158,6 +158,15 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+function jsonForHtml(data) {
+  return JSON.stringify(data)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
 function absoluteUrl(request, pathOrUrl) {
   if (!pathOrUrl) {
     return "";
@@ -195,15 +204,34 @@ function metaTagsForPost(request, item, url) {
 async function sendIndex(response, request, url) {
   let html = await readFile(join(root, "index.html"), "utf8");
   let item = null;
+  let initialNews = [];
+
+  try {
+    initialNews = await getNewsItems();
+  } catch (error) {
+    console.error("Initial news load failed:", error.message);
+  }
 
   if (url.pathname.startsWith("/post/")) {
     const id = decodeURIComponent(url.pathname.replace("/post/", ""));
-    item = await getNewsItem(id);
+    item = initialNews.find((newsItem) => newsItem.id === id) || null;
+    if (!item) {
+      try {
+        item = await getNewsItem(id);
+      } catch (error) {
+        console.error("Post lookup failed:", error.message);
+      }
+    }
     const title = escapeHtml(item?.title ? `${item.title} | مؤسسة الميزان السياسي` : "مؤسسة الميزان السياسي للأبحاث والترجمة الإعلامية");
     html = html
       .replace(/<title>.*?<\/title>/s, `<title>${title}</title>`)
       .replace("</head>", `${metaTagsForPost(request, item, url)}\n</head>`);
   }
+
+  html = html.replace(
+    '<script src="/app.js"></script>',
+    `<script id="initialNewsData" type="application/json">${jsonForHtml(initialNews)}</script>\n  <script src="/app.js"></script>`
+  );
 
   response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   response.end(html);
