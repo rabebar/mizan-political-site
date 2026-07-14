@@ -111,12 +111,17 @@ function getNews() {
   if (serverMode && Array.isArray(serverNews)) {
     return serverNews;
   }
-  const stored = localStorage.getItem(newsKey);
-  if (!stored) {
-    localStorage.setItem(newsKey, JSON.stringify(seedNews));
+  try {
+    const stored = localStorage.getItem(newsKey);
+    if (!stored) {
+      localStorage.setItem(newsKey, JSON.stringify(seedNews));
+      return seedNews;
+    }
+    return JSON.parse(stored);
+  } catch {
+    localStorage.removeItem(newsKey);
     return seedNews;
   }
-  return JSON.parse(stored);
 }
 
 function setNews(news) {
@@ -175,7 +180,7 @@ async function saveNewsToServer(item) {
     return false;
   }
 
-  await apiRequest("/api/news", {
+  const savedItem = await apiRequest("/api/news", {
     method: "POST",
     headers: {
       "x-admin-user": currentAdmin,
@@ -183,7 +188,11 @@ async function saveNewsToServer(item) {
     },
     body: JSON.stringify(item)
   });
-  await syncNewsFromServer();
+  const currentNews = Array.isArray(serverNews) ? serverNews : [];
+  const exists = currentNews.some((newsItem) => newsItem.id === savedItem.id);
+  serverNews = exists
+    ? currentNews.map((newsItem) => newsItem.id === savedItem.id ? savedItem : newsItem)
+    : [savedItem, ...currentNews];
   return true;
 }
 
@@ -199,7 +208,9 @@ async function deleteNewsFromServer(id) {
       "x-admin-pass": currentAdminPassword
     }
   });
-  await syncNewsFromServer();
+  if (Array.isArray(serverNews)) {
+    serverNews = serverNews.filter((item) => item.id !== id);
+  }
   return true;
 }
 

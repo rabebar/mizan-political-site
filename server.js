@@ -205,9 +205,11 @@ async function sendIndex(response, request, url) {
       .replace("</head>", `${metaTagsForPost(request, item, url)}\n</head>`);
   }
 
-  await recordVisit(request, url, item);
   response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   response.end(html);
+  recordVisit(request, url, item).catch((error) => {
+    console.error("Visit tracking failed:", error.message);
+  });
 }
 
 function isLikelyBot(request) {
