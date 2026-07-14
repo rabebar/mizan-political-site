@@ -17,6 +17,7 @@ let currentAdminPassword = sessionStorage.getItem("mizan_current_admin_password"
 let currentAdminRole = localStorage.getItem("mizan_current_admin_role") || "admin";
 let searchTerm = "";
 let serverMode = false;
+let serverNews = null;
 let editingNewsId = "";
 let activeAdminTab = "overview";
 
@@ -107,6 +108,9 @@ const seedNews = [
 ];
 
 function getNews() {
+  if (serverMode && Array.isArray(serverNews)) {
+    return serverNews;
+  }
   const stored = localStorage.getItem(newsKey);
   if (!stored) {
     localStorage.setItem(newsKey, JSON.stringify(seedNews));
@@ -157,7 +161,7 @@ async function syncNewsFromServer() {
     const news = await apiRequest("/api/news");
     if (Array.isArray(news)) {
       serverMode = true;
-      setNews(news.length ? news : seedNews);
+      serverNews = news.length ? news : seedNews;
       return true;
     }
   } catch {
