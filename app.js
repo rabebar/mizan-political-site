@@ -5,7 +5,8 @@ const categories = [
   { id: "articles", label: "مقالات" },
   { id: "hebrew", label: "ترجمات عبرية" },
   { id: "international", label: "ترجمات دولية" },
-  { id: "middle-east", label: "الشرق الأوسط" }
+  { id: "middle-east", label: "الشرق الأوسط" },
+  { id: "support", label: "ادعم الميزان" }
 ];
 
 const categoryNames = Object.fromEntries(categories.map((category) => [category.id, category.label]));
@@ -295,7 +296,7 @@ async function deleteAdminFromServer(username) {
 
 function visibleNews() {
   let news = getNews().sort((a, b) => b.createdAt - a.createdAt);
-  if (activeView !== "home") {
+  if (activeView !== "home" && activeView !== "support") {
     news = news.filter((item) => item.category === activeView);
   }
   if (searchTerm) {
@@ -386,6 +387,7 @@ function setHomeVisibility(isHome) {
   document.querySelector(".latest-section").classList.toggle("hidden", !isHome);
   document.querySelector(".analysis-band").classList.toggle("hidden", !isHome);
   document.querySelector("#postView").classList.toggle("hidden", isHome);
+  document.querySelector("#supportView").classList.add("hidden");
 }
 
 function mainStory(item) {
@@ -475,6 +477,65 @@ function renderPostView(id) {
   `;
 }
 
+function renderSupportView() {
+  document.title = "ادعم مؤسسة الميزان السياسي | مؤسسة الميزان السياسي";
+  setHomeVisibility(false);
+  document.querySelector("#postView").classList.add("hidden");
+  const supportView = document.querySelector("#supportView");
+  supportView.classList.remove("hidden");
+  supportView.innerHTML = `
+    <section class="support-hero">
+      <div>
+        <span class="story-tag">دعم مستقل</span>
+        <h1>ادعم مؤسسة الميزان السياسي</h1>
+        <p>
+          يساعدنا دعمكم في استمرار الترجمة الإعلامية والتحليل السياسي العلمي المستقل،
+          بعيدًا عن الضجيج والمناكفات، وبما يضمن إنتاج مواد رصينة تعتمد على المصادر والسياقات والتحقق.
+        </p>
+      </div>
+      <div class="support-qr-card">
+        <img src="/support-qr.jpeg" alt="رمز QR للدعم عبر بنك فلسطين">
+        <span>امسح الرمز للدعم عبر محفظة بنك فلسطين</span>
+      </div>
+    </section>
+
+    <section class="support-details">
+      <div class="support-info">
+        <h2>التحويل البنكي بالدولار</h2>
+        <dl>
+          <div>
+            <dt>اسم المستفيد</dt>
+            <dd><code>RABE ALBARGHOUTHI</code></dd>
+          </div>
+          <div>
+            <dt>IBAN</dt>
+            <dd><code>PS72PALS045802050490013100000</code></dd>
+          </div>
+          <div>
+            <dt>البنك</dt>
+            <dd>Bank of Palestine</dd>
+          </div>
+          <div>
+            <dt>العملة</dt>
+            <dd>USD</dd>
+          </div>
+        </dl>
+        <div class="support-actions">
+          <button class="primary" type="button" data-copy-text="PS72PALS045802050490013100000">نسخ رقم IBAN</button>
+          <button class="ghost" type="button" data-copy-text="RABE ALBARGHOUTHI">نسخ اسم المستفيد</button>
+        </div>
+      </div>
+      <aside class="support-note">
+        <h2>ملاحظة</h2>
+        <p>
+          عند إجراء تحويل، يمكن كتابة ملاحظة: دعم الميزان. هذا الدعم لا يؤثر على الخط التحريري للمؤسسة
+          ولا يغيّر معيارنا الأساسي: وزن الخبر والمعلومة قبل نشرها.
+        </p>
+      </aside>
+    </section>
+  `;
+}
+
 function formatPostBody(text) {
   return String(text || "")
     .split(/\n{2,}/)
@@ -502,6 +563,11 @@ function renderSite() {
   const postId = getPostIdFromLocation();
   if (postId) {
     renderPostView(postId);
+    return;
+  }
+  if (activeView === "support") {
+    renderNav();
+    renderSupportView();
     return;
   }
   document.title = "مؤسسة الميزان السياسي للأبحاث والترجمة الإعلامية";
@@ -834,6 +900,21 @@ document.addEventListener("click", async (event) => {
       }, 1400);
     } catch {
       prompt("انسخ الرابط:", link);
+    }
+    return;
+  }
+
+  const copyTextButton = event.target.closest("[data-copy-text]");
+  if (copyTextButton) {
+    const originalText = copyTextButton.textContent;
+    try {
+      await navigator.clipboard.writeText(copyTextButton.dataset.copyText);
+      copyTextButton.textContent = "تم النسخ";
+      setTimeout(() => {
+        copyTextButton.textContent = originalText;
+      }, 1400);
+    } catch {
+      prompt("انسخ النص:", copyTextButton.dataset.copyText);
     }
     return;
   }
