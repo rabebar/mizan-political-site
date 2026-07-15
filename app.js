@@ -309,7 +309,7 @@ function visibleNews() {
 function renderNav() {
   const nav = document.querySelector("#categoryNav");
   nav.innerHTML = categories.map((category) => `
-    <button type="button" class="${activeView === category.id ? "is-active" : ""}" data-view="${category.id}">
+    <button type="button" class="${activeView === category.id ? "is-active" : ""} ${category.id === "support" ? "support-nav-button" : ""}" data-view="${category.id}">
       ${category.label}
     </button>
   `).join("");
