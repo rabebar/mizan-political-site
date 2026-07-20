@@ -541,8 +541,26 @@ function formatPostBody(text) {
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
-    .map((paragraph) => `<p>${paragraph.replace(/\n/g, "<br>")}</p>`)
+    .map((paragraph) => `<p>${linkifyText(paragraph).replace(/\n/g, "<br>")}</p>`)
     .join("");
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function linkifyText(value) {
+  const escaped = escapeHtml(value);
+  return escaped.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
+    const cleanUrl = url.replace(/[،.؛)]+$/g, "");
+    const suffix = url.slice(cleanUrl.length);
+    return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer">${cleanUrl}</a>${suffix}`;
+  });
 }
 
 function authorBlock(item) {
