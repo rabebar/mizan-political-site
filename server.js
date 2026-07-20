@@ -14,6 +14,9 @@ const envAdminUser = String(process.env.ADMIN_USERNAME || "").trim();
 const envAdminPassword = String(process.env.ADMIN_PASSWORD || "");
 const superAdminUser = String(process.env.SUPER_ADMIN_USERNAME || envAdminUser || "").trim();
 const databaseUrl = process.env.DATABASE_URL || "";
+const telegramBotToken = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
+const telegramChatId = String(process.env.TELEGRAM_CHAT_ID || "").trim();
+const publicSiteUrl = String(process.env.PUBLIC_SITE_URL || process.env.RENDER_EXTERNAL_URL || "").trim().replace(/\/$/, "");
 let poolPromise = null;
 let dbReadyPromise = null;
 
@@ -377,6 +380,50 @@ function publicNewsItem(item) {
   };
 }
 
+function escapeTelegramHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function buildPostUrl(request, item) {
+  const hostUrl = `${request.headers["x-forwarded-proto"] || "https"}://${request.headers.host}`;
+  const baseUrl = publicSiteUrl || hostUrl.replace(/\/$/, "");
+  return `${baseUrl}/post/${encodeURIComponent(item.id)}`;
+}
+
+async function notifyTelegramNewPost(request, item) {
+  if (!telegramBotToken || !telegramChatId) {
+    return;
+  }
+
+  const postUrl = buildPostUrl(request, item);
+  const category = item.category ? `\nالقسم: ${escapeTelegramHtml(item.category)}` : "";
+  const summary = item.summary ? `\n\n${escapeTelegramHtml(item.summary)}` : "";
+  const text = `<b>${escapeTelegramHtml(item.title)}</b>${category}${summary}\n\n<a href="${escapeTelegramHtml(postUrl)}">قراءة المادة كاملة</a>`;
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: telegramChatId,
+        text,
+        parse_mode: "HTML",
+        disable_web_page_preview: false
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Telegram notification failed:", response.status, errorText);
+    }
+  } catch (error) {
+    console.error("Telegram notification failed:", error.message);
+  }
+}
+
 async function getNewsItems() {
   const pool = await getPool();
   if (!pool) {
@@ -624,7 +671,11 @@ async function handleApi(request, response, url) {
       return sendJson(response, 400, { error: "Missing title or summary" });
     }
 
+    const existing = await getNewsItem(item.id);
     await saveNewsItem(item);
+    if (!existing) {
+      await notifyTelegramNewPost(request, item);
+    }
     return sendJson(response, 200, item);
   }
 
