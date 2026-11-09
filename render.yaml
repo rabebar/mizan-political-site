@@ -5,3 +5,16 @@ services:
     buildCommand: "npm install"
     startCommand: "npm start"
     autoDeployTrigger: commit
+    envVars:
+      - key: CONTENT_GITHUB_OWNER
+        value: rabebar
+      - key: CONTENT_GITHUB_REPO
+        value: mizan-content
+      - key: CONTENT_GITHUB_BRANCH
+        value: main
+      - key: CONTENT_GITHUB_TOKEN
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false

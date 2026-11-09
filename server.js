@@ -14,6 +14,15 @@ const envAdminUser = String(process.env.ADMIN_USERNAME || "").trim();
 const envAdminPassword = String(process.env.ADMIN_PASSWORD || "");
 const superAdminUser = String(process.env.SUPER_ADMIN_USERNAME || envAdminUser || "").trim();
 const databaseUrl = process.env.DATABASE_URL || "";
+const contentGitHubOwner = String(process.env.CONTENT_GITHUB_OWNER || "").trim();
+const contentGitHubRepo = String(process.env.CONTENT_GITHUB_REPO || "").trim();
+const contentGitHubBranch = String(process.env.CONTENT_GITHUB_BRANCH || "main").trim();
+const contentGitHubToken = String(process.env.CONTENT_GITHUB_TOKEN || "").trim();
+const contentGitHubConfigured = Boolean(contentGitHubOwner && contentGitHubRepo && contentGitHubToken);
+const runningOnRender = process.env.RENDER === "true" || Boolean(process.env.RENDER_EXTERNAL_URL);
+if ([contentGitHubOwner, contentGitHubRepo, contentGitHubToken].some(Boolean) && !contentGitHubConfigured) {
+  throw new Error("Set CONTENT_GITHUB_OWNER, CONTENT_GITHUB_REPO, and CONTENT_GITHUB_TOKEN together");
+}
 const telegramBotToken = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const telegramChatId = String(process.env.TELEGRAM_CHAT_ID || "").trim();
 const publicSiteUrl = String(process.env.PUBLIC_SITE_URL || process.env.RENDER_EXTERNAL_URL || "").trim().replace(/\/$/, "");
@@ -380,6 +389,82 @@ function publicNewsItem(item) {
   };
 }
 
+function githubApiHeaders() {
+  return {
+    "accept": "application/vnd.github+json",
+    "authorization": `Bearer ${contentGitHubToken}`,
+    "x-github-api-version": "2022-11-28"
+  };
+}
+
+function githubContentsUrl(path) {
+  return `https://api.github.com/repos/${encodeURIComponent(contentGitHubOwner)}/${encodeURIComponent(contentGitHubRepo)}/contents/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+async function getGitHubContent(path) {
+  const response = await fetch(`${githubContentsUrl(path)}?ref=${encodeURIComponent(contentGitHubBranch)}`, {
+    headers: githubApiHeaders()
+  });
+  if (response.status === 404) return { content: null, sha: null };
+  if (!response.ok) throw new Error(`Content repository read failed (${response.status})`);
+  const file = await response.json();
+  return { content: Buffer.from(file.content.replace(/\n/g, ""), "base64").toString("utf8"), sha: file.sha };
+}
+
+async function putGitHubContent(path, content, message, existingSha = null) {
+  const response = await fetch(githubContentsUrl(path), {
+    method: "PUT",
+    headers: { ...githubApiHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({
+      message,
+      content: Buffer.from(content, "utf8").toString("base64"),
+      branch: contentGitHubBranch,
+      ...(existingSha ? { sha: existingSha } : {})
+    })
+  });
+  if (!response.ok) throw new Error(`Content repository write failed (${response.status})`);
+}
+
+async function getGitHubNews() {
+  const file = await getGitHubContent("data/news.json");
+  if (!file.content) return [];
+  const news = JSON.parse(file.content);
+  if (!Array.isArray(news)) throw new Error("data/news.json in the content repository must contain an array");
+  return news;
+}
+
+async function saveGitHubNewsItem(item) {
+  const current = await getGitHubNews();
+  const existing = current.find((entry) => entry.id === item.id);
+  const next = existing
+    ? current.map((entry) => entry.id === item.id ? { ...entry, ...item, createdAt: entry.createdAt } : entry)
+    : [item, ...current];
+  const file = await getGitHubContent("data/news.json");
+  await putGitHubContent("data/news.json", JSON.stringify(next, null, 2), `Update Mizan article: ${item.id}`, file.sha);
+}
+
+async function uploadImageToGitHub(dataUrl) {
+  const match = String(dataUrl).match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) throw new Error("Unsupported image format; use JPEG, PNG, WebP, or GIF");
+  const mimeType = match[1];
+  const bytes = Buffer.from(match[2], "base64");
+  if (!bytes.length || bytes.length > 6 * 1024 * 1024) throw new Error("Each image must be smaller than 6 MB");
+  const extension = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" }[mimeType];
+  const filename = `${Date.now()}-${randomUUID()}.${extension}`;
+  const path = `images/${filename}`;
+  const response = await fetch(githubContentsUrl(path), {
+    method: "PUT",
+    headers: { ...githubApiHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({
+      message: `Add Mizan image ${filename}`,
+      content: bytes.toString("base64"),
+      branch: contentGitHubBranch
+    })
+  });
+  if (!response.ok) throw new Error(`Image storage failed (${response.status})`);
+  return `https://raw.githubusercontent.com/${contentGitHubOwner}/${contentGitHubRepo}/${encodeURIComponent(contentGitHubBranch)}/${path}`;
+}
+
 function escapeTelegramHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -425,6 +510,7 @@ async function notifyTelegramNewPost(request, item) {
 }
 
 async function getNewsItems() {
+  if (contentGitHubConfigured) return getGitHubNews();
   const pool = await getPool();
   if (!pool) {
     return readJson(newsFile, []);
@@ -435,6 +521,10 @@ async function getNewsItems() {
 }
 
 async function getNewsItem(id) {
+  if (contentGitHubConfigured) {
+    const news = await getGitHubNews();
+    return news.find((item) => item.id === id) || null;
+  }
   const pool = await getPool();
   if (!pool) {
     const news = await readJson(newsFile, []);
@@ -475,6 +565,10 @@ async function saveNewsItemToDatabase(pool, item) {
 }
 
 async function saveNewsItem(item) {
+  if (contentGitHubConfigured) {
+    await saveGitHubNewsItem(item);
+    return;
+  }
   const pool = await getPool();
   if (!pool) {
     const news = await readJson(newsFile, []);
@@ -489,6 +583,13 @@ async function saveNewsItem(item) {
 }
 
 async function deleteNewsItem(id) {
+  if (contentGitHubConfigured) {
+    const current = await getGitHubNews();
+    const next = current.filter((item) => item.id !== id);
+    const file = await getGitHubContent("data/news.json");
+    await putGitHubContent("data/news.json", JSON.stringify(next, null, 2), `Delete Mizan article: ${id}`, file.sha);
+    return;
+  }
   const pool = await getPool();
   if (!pool) {
     const news = await readJson(newsFile, []);
@@ -665,10 +766,20 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === "/api/news" && request.method === "POST") {
     await requireAdmin(request);
+    if (runningOnRender && !contentGitHubConfigured) {
+      return sendJson(response, 503, { error: "Persistent article storage is not configured yet" });
+    }
     const body = await readBody(request);
     const item = normalizeItem(body);
     if (!item.title || !item.summary) {
       return sendJson(response, 400, { error: "Missing title or summary" });
+    }
+
+    if (contentGitHubConfigured) {
+      if (item.image.startsWith("data:image/svg+xml")) item.image = "";
+      else if (item.image.startsWith("data:")) item.image = await uploadImageToGitHub(item.image);
+      if (item.authorImage.startsWith("data:image/svg+xml")) item.authorImage = "";
+      else if (item.authorImage.startsWith("data:")) item.authorImage = await uploadImageToGitHub(item.authorImage);
     }
 
     const existing = await getNewsItem(item.id);
@@ -681,6 +792,9 @@ async function handleApi(request, response, url) {
 
   if (url.pathname.startsWith("/api/news/") && request.method === "DELETE") {
     await requireAdmin(request);
+    if (runningOnRender && !contentGitHubConfigured) {
+      return sendJson(response, 503, { error: "Persistent article storage is not configured yet" });
+    }
     const id = decodeURIComponent(url.pathname.replace("/api/news/", ""));
     await deleteNewsItem(id);
     return sendJson(response, 200, { ok: true });
