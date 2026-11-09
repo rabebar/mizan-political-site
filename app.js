@@ -190,7 +190,7 @@ async function syncNewsFromServer(includeAdminData = false) {
     const news = await apiRequest("/api/news", includeAdminData ? { headers: adminHeaders() } : {});
     if (Array.isArray(news)) {
       serverMode = true;
-      serverNews = news.length ? news : seedNews;
+      serverNews = news;
       return true;
     }
   } catch {
